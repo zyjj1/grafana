@@ -371,6 +371,7 @@ func (hs *HTTPServer) registerRoutes() {
 
 		// DataSource w/ expressions
 		apiRoute.Post("/ds/query", bind(dtos.MetricRequest{}), routing.Wrap(hs.QueryMetricsV2))
+		apiRoute.Get("/ds/query", routing.Wrap(hs.GetMetricsV2))
 
 		apiRoute.Group("/alerts", func(alertsRoute routing.RouteRegister) {
 			alertsRoute.Post("/test", bind(dtos.AlertTestCommand{}), routing.Wrap(hs.AlertTest))

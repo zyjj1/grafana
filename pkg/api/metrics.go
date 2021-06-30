@@ -2,10 +2,12 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
+	"github.com/grafana/grafana/pkg/api/dashboardpanels"
 	"github.com/grafana/grafana/pkg/expr"
 	"github.com/grafana/grafana/pkg/models"
 	"github.com/grafana/grafana/pkg/plugins"
@@ -157,6 +159,81 @@ func (hs *HTTPServer) handleGetDataSourceError(err error, datasourceID int64) *r
 		return response.Error(400, "Invalid data source ID", err)
 	}
 	return response.Error(500, "Unable to load data source metadata", err)
+}
+
+func (hs *HTTPServer) GetMetricsV2(c *models.ReqContext) response.Response {
+	dashboardID := c.QueryInt64("dashboardID")
+	datasourceID := c.QueryInt64("datasourceID")
+	from := c.Query("from")
+	to := c.Query("to")
+
+	if dashboardID == 0 {
+		return response.Error(http.StatusBadRequest, "Invalid id", errors.New("dashboardID cannot be 0 or empty"))
+	}
+
+	if from == "" || to == "" {
+		return response.JSON(http.StatusBadRequest, "Invalid `from` or `to` values")
+	}
+
+	dashboard, err := hs.SQLStore.GetDashboard(dashboardID, c.OrgId, "", "")
+	if err != nil {
+		return response.Error(http.StatusInternalServerError, "Cannot retrieve dashboard information", err)
+	}
+
+	var dashboardInformation dashboardpanels.DashboardPanel
+	bytes, err := dashboard.Data.MarshalJSON()
+	if err != nil {
+		return response.Error(http.StatusInternalServerError, "Cannot extract dashboard information", err)
+	}
+
+	if err = json.Unmarshal(bytes, &dashboardInformation); err != nil {
+		return response.Error(http.StatusInternalServerError, "Cannot extract dashboard information", err)
+	}
+
+	ds, err := hs.DatasourceCache.GetDatasource(datasourceID, c.SignedInUser, c.SkipCache)
+	if err != nil {
+		return hs.handleGetDataSourceError(err, datasourceID)
+	}
+
+	queries, err := dashboardInformation.GetDatasourcePanelQueries(ds)
+	if err != nil {
+		return response.Error(http.StatusInternalServerError, "Cannot retrieve panel information", err)
+	}
+
+	timeRange := plugins.NewDataTimeRange(from, to)
+	request := plugins.DataQuery{
+		TimeRange: &timeRange,
+		User:      c.SignedInUser,
+		Queries:   make([]plugins.DataSubQuery, 0, len(queries)),
+	}
+
+	for _, q := range queries {
+		request.Queries = append(request.Queries, plugins.DataSubQuery{
+			RefID:         q.Get("refId").MustString("A"),
+			MaxDataPoints: q.Get("maxDataPoints").MustInt64(100),
+			IntervalMS:    q.Get("intervalMs").MustInt64(1000),
+			QueryType:     q.Get("queryType").MustString(""),
+			Model:         q,
+			DataSource:    ds,
+		})
+	}
+
+	err = hs.PluginRequestValidator.Validate(ds.Url, nil)
+	if err != nil {
+		return response.Error(http.StatusForbidden, "Access denied", err)
+	}
+
+	resp, err := hs.DataService.HandleRequest(c.Req.Context(), ds, request)
+	if err != nil {
+		return response.Error(http.StatusInternalServerError, "Metric request error", err)
+	}
+
+	qdr, err := resp.ToBackendDataResponse()
+	if err != nil {
+		return response.Error(http.StatusInternalServerError, "error converting results", err)
+	}
+	return toMacronResponse(qdr)
+
 }
 
 // QueryMetrics returns query metrics
