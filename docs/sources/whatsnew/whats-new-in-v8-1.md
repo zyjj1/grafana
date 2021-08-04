@@ -1,5 +1,5 @@
 +++
-title = "What's new in Grafana v8.1"
+title = "What’s new in Grafana v8.1"
 description = "Feature and improvement highlights for Grafana v8.1"
 keywords = ["grafana", "new", "documentation", "8.1", "release notes"]
 weight = -33
@@ -15,7 +15,6 @@ list = false
 Grafana 8.1 builds upon our promise of a composable, open observability platform with new panels and extends functionality launched in Grafana 8.0. We’ve got new  Geomap and Annotations panels, and some great updates to the Time Series panel. We’ve also got new transformations and updates to data sources. For our enterprise customers, there are additions to fine grained access control, updates to the reporting schedule and query caching, and more. Read on to learn more.
 
 In addition to what is summarized here, you might also be interested in our announcement blog post. For all the technical details, check out the complete [CHANGELOG.md](https://github.com/grafana/grafana/blob/master/CHANGELOG.md).
-
 
 ## Grafana OSS features
 
@@ -79,7 +78,7 @@ As you can see each row in the source data becomes a separate field. Each field 
 
 For more on how to use this transformation, refer to [Rows to fields transform]({{< relref "../panels/transformations/rows-to-fields.md" >}}).
 
-#### Contextual & Inline Help
+#### Contextual and inline help
 
 Additional inline help will be available for Transformations. We can now share examples of how to use specific transformations and point users directly to the appropriate place in the docs for more information.
 
@@ -87,7 +86,7 @@ Additional inline help will be available for Transformations. We can now share e
 
 The following data source updates are included with this Grafana release.
 
-#### MySQL Data Source
+#### MySQL data source
 
 We have added timezone support. As a result, you can now specify the time zone used in the database session, such as `Europe/Berlin` or `+02:00`.
 
@@ -95,7 +94,7 @@ We have added timezone support. As a result, you can now specify the time zone u
 
 We changed the default behavior from creating a 1-hour span Loki query to the only query at the exact time the trace span started for the duration of it. For more fine grained control over this, you can shift this time in the tracing data source settings. Also, it is now possible to shift the start time and end time of the Loki query by the set amount. For more information, refer to [Trace to logs]({{< relref "../datasources/tempo.md#trace-to-logs" >}}).
 
-### Prettify JSON for Logs in Explore
+### Prettify JSON for logs in Explore
 
 Added the ability to format JSON to make it easier to view, review and find relevant data in JSON format logs. This is a regular JSON log.
 
@@ -111,7 +110,6 @@ For more on how to prettify JSON logs, refer to [Visualization]({{< relref "../p
 
 We’ve made some changes to the plugins UI to help make it easier to discover and manage your plugins. Enterprise users can now also manage enterprise plugins from within the catalog.
 
-
 #### Documentation updates
 
 New panel summaries and preview on the top level [Visualizations]({{< relref "../panels/visualizations/_index.md" >}}) page to help users pick or learn about specific visualizations more easily.
@@ -126,7 +124,6 @@ Fine-grained access control remains in beta. You can now grant or revoke permiss
 
 Fine grained access control allows you to customize roles and permissions in Grafana beyond the built-in Viewer, Editor, and Admin roles. As of 8.1, you can modify some of the permissions for any of these built-in roles. This is helpful if you’d like users to have more or fewer access permissions than a given role allows for by default. For an overview of fine-grained access control and a complete list of available permissions, refer to the [Fine grained access control]({{< relref "../enterprise/access-control/_index.md" >}}) documentation.
 
-
 ### New and improved reporting scheduler
 
 We’ve enhanced the scheduler for Reports to be more flexible, so you can send reports at just the right time. When scheduling a report, you can now choose to send a report at custom intervals such as every 4 hours or every 2 weeks. You can also send a report for a limited time period by providing a start and end date, or send a report only on weekdays or on the last day of each month. This change accompanies some other recent improvements to Reporting, like the ability to choose template variables for reports and an improved UX for authoring reports. To learn more, refer to the [reporting]({{< relref "../enterprise/reporting.md" >}}) documentation.
@@ -135,8 +132,7 @@ We’ve enhanced the scheduler for Reports to be more flexible, so you can send 
 
 Query caching was released in Grafana 8.0 and allows you to temporarily store the results of data source queries in a cache, so that Grafana reads repeated queries from there instead of from the data source itself. This reduces load on data sources, improves dashboard load times, and can save money for data sources that charge per query. To learn more about query caching see its [overview]({{< relref "../enterprise/query-caching.md" >}}) page. To find out how to turn on encryption, refer to the [caching configuration]({{< relref "../enterprise/enterprise-configuration.md#caching" >}}) documentation.
 
-You can now encrypt the query data cached by Grafana. This improves the security of query data, especially when your cache (like Redis) is shared with other services. 
-
+You can now encrypt the query data cached by Grafana. This improves the security of query data, especially when your cache (like Redis) is shared with other services.
 
 ### White labeling for the Grafana loading logo
 
