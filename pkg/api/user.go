@@ -122,11 +122,6 @@ func handleUpdateUser(ctx context.Context, cmd models.UpdateUserCommand) respons
 	return response.Success("User updated")
 }
 
-// GET /api/user/orgs
-func GetSignedInUserOrgList(c *models.ReqContext) response.Response {
-	return getUserOrgList(c.Req.Context(), c.UserId)
-}
-
 // GET /api/user/teams
 func GetSignedInUserTeamList(c *models.ReqContext) response.Response {
 	return getUserTeamList(c.Req.Context(), c.OrgId, c.UserId)
@@ -150,24 +145,8 @@ func getUserTeamList(ctx context.Context, orgID int64, userID int64) response.Re
 	return response.JSON(200, query.Result)
 }
 
-// GET /api/users/:id/orgs
-func GetUserOrgList(c *models.ReqContext) response.Response {
-	return getUserOrgList(c.Req.Context(), c.ParamsInt64(":id"))
-}
-
-func getUserOrgList(ctx context.Context, userID int64) response.Response {
-	query := models.GetUserOrgListQuery{UserId: userID}
-
-	if err := bus.DispatchCtx(ctx, &query); err != nil {
-		return response.Error(500, "Failed to get user organizations", err)
-	}
-
-	return response.JSON(200, query.Result)
-}
-
 func validateUsingOrg(ctx context.Context, userID int64, orgID int64) bool {
 	query := models.GetUserOrgListQuery{UserId: userID}
-
 	if err := bus.DispatchCtx(ctx, &query); err != nil {
 		return false
 	}

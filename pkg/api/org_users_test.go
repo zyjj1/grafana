@@ -8,18 +8,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/grafana/grafana/pkg/services/searchusers/filters"
-
-	"github.com/grafana/grafana/pkg/bus"
-	"github.com/grafana/grafana/pkg/services/searchusers"
-
 	"github.com/grafana/grafana/pkg/api/dtos"
 	"github.com/grafana/grafana/pkg/api/routing"
+	"github.com/grafana/grafana/pkg/bus"
 	"github.com/grafana/grafana/pkg/components/simplejson"
 	"github.com/grafana/grafana/pkg/models"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	accesscontrolmock "github.com/grafana/grafana/pkg/services/accesscontrol/mock"
+	"github.com/grafana/grafana/pkg/services/orgs"
 	"github.com/grafana/grafana/pkg/services/quota"
+	"github.com/grafana/grafana/pkg/services/searchusers"
+	"github.com/grafana/grafana/pkg/services/searchusers/filters"
 	"github.com/grafana/grafana/pkg/services/sqlstore"
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/stretchr/testify/assert"
@@ -148,6 +147,7 @@ func setupOrgUsersAPIcontext(t *testing.T, role models.RoleType) (*scenarioConte
 		AccessControl:      accesscontrolmock.New().WithDisabled(),
 		SQLStore:           db,
 		searchUsersService: searchusers.ProvideUsersService(bus.New(), filters.ProvideOSSSearchUserFilter()),
+		orgsService:        orgs.ProvideOrgService(db),
 	}
 
 	sc := setupScenarioContext(t, "/api/org/users/lookup")

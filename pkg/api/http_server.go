@@ -13,8 +13,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/grafana/grafana/pkg/services/searchusers"
-
 	"github.com/grafana/grafana/pkg/api/routing"
 	httpstatic "github.com/grafana/grafana/pkg/api/static"
 	"github.com/grafana/grafana/pkg/bus"
@@ -47,11 +45,13 @@ import (
 	"github.com/grafana/grafana/pkg/services/ngalert"
 	"github.com/grafana/grafana/pkg/services/notifications"
 	"github.com/grafana/grafana/pkg/services/oauthtoken"
+	"github.com/grafana/grafana/pkg/services/orgs"
 	"github.com/grafana/grafana/pkg/services/provisioning"
 	"github.com/grafana/grafana/pkg/services/quota"
 	"github.com/grafana/grafana/pkg/services/rendering"
 	"github.com/grafana/grafana/pkg/services/schemaloader"
 	"github.com/grafana/grafana/pkg/services/search"
+	"github.com/grafana/grafana/pkg/services/searchusers"
 	"github.com/grafana/grafana/pkg/services/shorturls"
 	"github.com/grafana/grafana/pkg/services/sqlstore"
 	"github.com/grafana/grafana/pkg/setting"
@@ -110,6 +110,7 @@ type HTTPServer struct {
 	tracingService         *tracing.TracingService
 	internalMetricsSvc     *metrics.InternalMetricsService
 	searchUsersService     searchusers.Service
+	orgsService            orgs.Service
 }
 
 type ServerOptions struct {
@@ -133,7 +134,7 @@ func ProvideHTTPServer(opts ServerOptions, cfg *setting.Cfg, routeRegister routi
 	notificationService *notifications.NotificationService, tracingService *tracing.TracingService,
 	internalMetricsSvc *metrics.InternalMetricsService, quotaService *quota.QuotaService,
 	socialService social.Service, oauthTokenService oauthtoken.OAuthTokenService,
-	encryptionService encryption.Service, searchUsersService searchusers.Service) (*HTTPServer, error) {
+	encryptionService encryption.Service, searchUsersService searchusers.Service, orgsService orgs.Service) (*HTTPServer, error) {
 	macaron.Env = cfg.Env
 	m := macaron.New()
 
@@ -181,6 +182,7 @@ func ProvideHTTPServer(opts ServerOptions, cfg *setting.Cfg, routeRegister routi
 		OAuthTokenService:      oauthTokenService,
 		EncryptionService:      encryptionService,
 		searchUsersService:     searchUsersService,
+		orgsService:            orgsService,
 	}
 	if hs.Listener != nil {
 		hs.log.Debug("Using provided listener")

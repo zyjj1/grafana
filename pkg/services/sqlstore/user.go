@@ -23,11 +23,11 @@ func (ss *SQLStore) addUserQueryAndCommandHandlers() {
 	bus.AddHandlerCtx("sql", ChangeUserPassword)
 	bus.AddHandlerCtx("sql", ss.GetUserByLogin)
 	bus.AddHandlerCtx("sql", ss.GetUserByEmail)
-	bus.AddHandlerCtx("sql", SetUsingOrg)
+	bus.AddHandlerCtx("sql", ss.SetUsingOrg)
 	bus.AddHandlerCtx("sql", UpdateUserLastSeenAt)
 	bus.AddHandlerCtx("sql", ss.GetUserProfile)
 	bus.AddHandlerCtx("sql", SearchUsers)
-	bus.AddHandlerCtx("sql", GetUserOrgList)
+	bus.AddHandlerCtx("sql", ss.GetUserOrgList)
 	bus.AddHandlerCtx("sql", DisableUser)
 	bus.AddHandlerCtx("sql", BatchDisableUsers)
 	bus.AddHandlerCtx("sql", DeleteUser)
@@ -402,9 +402,10 @@ func UpdateUserLastSeenAt(ctx context.Context, cmd *models.UpdateUserLastSeenAtC
 	})
 }
 
-func SetUsingOrg(ctx context.Context, cmd *models.SetUsingOrgCommand) error {
+func (ss *SQLStore) SetUsingOrg(ctx context.Context, cmd *models.SetUsingOrgCommand) error {
 	getOrgsForUserCmd := &models.GetUserOrgListQuery{UserId: cmd.UserId}
-	if err := GetUserOrgList(ctx, getOrgsForUserCmd); err != nil {
+	err := ss.GetUserOrgList(ctx, getOrgsForUserCmd)
+	if err != nil {
 		return err
 	}
 
@@ -482,9 +483,10 @@ func (o byOrgName) Less(i, j int) bool {
 	return o[i].Name < o[j].Name
 }
 
-func GetUserOrgList(ctx context.Context, query *models.GetUserOrgListQuery) error {
+func (ss *SQLStore) GetUserOrgList(ctx context.Context, query *models.GetUserOrgListQuery) error {
 	query.Result = make([]*models.UserOrgDTO, 0)
-	sess := x.Table("org_user")
+	sess := x.Context(ctx)
+	sess.Table("org_user")
 	sess.Join("INNER", "org", "org_user.org_id=org.id")
 	sess.Where("org_user.user_id=?", query.UserId)
 	sess.Cols("org.name", "org_user.role", "org_user.org_id")
