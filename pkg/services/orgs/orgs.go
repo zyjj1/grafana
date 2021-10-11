@@ -2,6 +2,7 @@ package orgs
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/grafana/grafana/pkg/api/response"
 	"github.com/grafana/grafana/pkg/bus"
@@ -34,8 +35,8 @@ func (s *OSSService) GetUserOrgList(c *models.ReqContext) response.Response {
 func (s *OSSService) getUserOrgsList(ctx context.Context, userID int64) response.Response {
 	query := models.GetUserOrgListQuery{UserId: userID}
 	if err := s.sqlStore.GetUserOrgList(ctx, &query); err != nil {
-		return response.Error(500, "Failed to get user organizations", err)
+		return response.Error(http.StatusInternalServerError, "Failed to get user organizations", err)
 	}
 
-	return response.JSON(200, query.Result)
+	return response.JSON(http.StatusOK, query.Result)
 }
