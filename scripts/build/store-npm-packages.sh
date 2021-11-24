@@ -10,7 +10,7 @@ else
 fi
 
 echo "Storing NPM artifacts"
-ZIPFILE=grafana-npm-${GRAFANA_TAG}.tgz
+ZIPFILE=grafana-npm-${_grafana_version}.tgz
 tar -czf $ZIPFILE packages/*/dist packages/*/compiled
 gsutil cp $ZIPFILE gs://grafana-prerelease/artifacts/npm/$ZIPFILE
 echo "Done."

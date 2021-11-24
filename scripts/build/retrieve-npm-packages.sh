@@ -10,6 +10,6 @@ else
 fi
 
 echo "Retrieving prerelease NPM artifacts"
-ZIPFILE=grafana-npm-${GRAFANA_TAG}.tgz
+ZIPFILE=grafana-npm-${_grafana_version}.tgz
 gsutil cp gs://grafana-prerelease/artifacts/npm/$ZIPFILE $ZIPFILE
 tar -xzf $ZIPFILE
