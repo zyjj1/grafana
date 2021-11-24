@@ -287,15 +287,15 @@ steps:
   - package
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
-- depends_on:
+- commands:
+  - ./bin/grabpl build-docker --edition oss -archs amd64
+  depends_on:
   - copy-packages-for-docker
-  image: grafana/drone-grafana-docker:0.3.2
+  image: grafana/build-container:1.4.6
   name: build-docker-images
-  settings:
-    archs: amd64
-    dry_run: true
-    edition: oss
-    ubuntu: false
+  volumes:
+  - name: docker
+    path: /var/run/docker.sock
 trigger:
   event:
   - pull_request
@@ -718,30 +718,24 @@ steps:
   - package
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
-- depends_on:
+- commands:
+  - ./bin/grabpl build-docker --edition oss
+  depends_on:
   - copy-packages-for-docker
-  image: grafana/drone-grafana-docker:0.3.2
+  image: grafana/build-container:1.4.6
   name: build-docker-images
-  settings:
-    dry_run: false
-    edition: oss
-    password:
-      from_secret: docker_password
-    ubuntu: false
-    username:
-      from_secret: docker_user
-- depends_on:
+  volumes:
+  - name: docker
+    path: /var/run/docker.sock
+- commands:
+  - ./bin/grabpl build-docker --edition oss --ubuntu
+  depends_on:
   - copy-packages-for-docker
-  image: grafana/drone-grafana-docker:0.3.2
+  image: grafana/build-container:1.4.6
   name: build-docker-images-ubuntu
-  settings:
-    dry_run: false
-    edition: oss
-    password:
-      from_secret: docker_password
-    ubuntu: true
-    username:
-      from_secret: docker_user
+  volumes:
+  - name: docker
+    path: /var/run/docker.sock
 - commands:
   - ./scripts/circle-release-canary-packages.sh
   depends_on:
@@ -1184,30 +1178,24 @@ steps:
   - package
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
-- depends_on:
+- commands:
+  - ./bin/grabpl build-docker --edition oss
+  depends_on:
   - copy-packages-for-docker
-  image: grafana/drone-grafana-docker:0.3.2
+  image: grafana/build-container:1.4.6
   name: build-docker-images
-  settings:
-    dry_run: false
-    edition: oss
-    password:
-      from_secret: docker_password
-    ubuntu: false
-    username:
-      from_secret: docker_user
-- depends_on:
+  volumes:
+  - name: docker
+    path: /var/run/docker.sock
+- commands:
+  - ./bin/grabpl build-docker --edition oss --ubuntu
+  depends_on:
   - copy-packages-for-docker
-  image: grafana/drone-grafana-docker:0.3.2
+  image: grafana/build-container:1.4.6
   name: build-docker-images-ubuntu
-  settings:
-    dry_run: false
-    edition: oss
-    password:
-      from_secret: docker_password
-    ubuntu: true
-    username:
-      from_secret: docker_user
+  volumes:
+  - name: docker
+    path: /var/run/docker.sock
 - commands:
   - yarn storybook:build
   - ./bin/grabpl verify-storybook
@@ -1658,30 +1646,24 @@ steps:
   - package
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
-- depends_on:
+- commands:
+  - ./bin/grabpl build-docker --edition enterprise
+  depends_on:
   - copy-packages-for-docker
-  image: grafana/drone-grafana-docker:0.3.2
+  image: grafana/build-container:1.4.6
   name: build-docker-images
-  settings:
-    dry_run: false
-    edition: enterprise
-    password:
-      from_secret: docker_password
-    ubuntu: false
-    username:
-      from_secret: docker_user
-- depends_on:
+  volumes:
+  - name: docker
+    path: /var/run/docker.sock
+- commands:
+  - ./bin/grabpl build-docker --edition enterprise --ubuntu
+  depends_on:
   - copy-packages-for-docker
-  image: grafana/drone-grafana-docker:0.3.2
+  image: grafana/build-container:1.4.6
   name: build-docker-images-ubuntu
-  settings:
-    dry_run: false
-    edition: enterprise
-    password:
-      from_secret: docker_password
-    ubuntu: true
-    username:
-      from_secret: docker_user
+  volumes:
+  - name: docker
+    path: /var/run/docker.sock
 - commands:
   - dockerize -wait tcp://redis:6379/0 -timeout 120s
   - ./bin/grabpl integration-tests
@@ -2272,22 +2254,24 @@ steps:
   - package
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
-- depends_on:
+- commands:
+  - ./bin/grabpl build-docker --edition oss
+  depends_on:
   - copy-packages-for-docker
-  image: grafana/drone-grafana-docker:0.3.2
+  image: grafana/build-container:1.4.6
   name: build-docker-images
-  settings:
-    dry_run: true
-    edition: oss
-    ubuntu: false
-- depends_on:
+  volumes:
+  - name: docker
+    path: /var/run/docker.sock
+- commands:
+  - ./bin/grabpl build-docker --edition oss --ubuntu
+  depends_on:
   - copy-packages-for-docker
-  image: grafana/drone-grafana-docker:0.3.2
+  image: grafana/build-container:1.4.6
   name: build-docker-images-ubuntu
-  settings:
-    dry_run: true
-    edition: oss
-    ubuntu: true
+  volumes:
+  - name: docker
+    path: /var/run/docker.sock
 - commands:
   - yarn storybook:build
   - ./bin/grabpl verify-storybook
@@ -2720,22 +2704,24 @@ steps:
   - package
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
-- depends_on:
+- commands:
+  - ./bin/grabpl build-docker --edition enterprise
+  depends_on:
   - copy-packages-for-docker
-  image: grafana/drone-grafana-docker:0.3.2
+  image: grafana/build-container:1.4.6
   name: build-docker-images
-  settings:
-    dry_run: true
-    edition: enterprise
-    ubuntu: false
-- depends_on:
+  volumes:
+  - name: docker
+    path: /var/run/docker.sock
+- commands:
+  - ./bin/grabpl build-docker --edition enterprise --ubuntu
+  depends_on:
   - copy-packages-for-docker
-  image: grafana/drone-grafana-docker:0.3.2
+  image: grafana/build-container:1.4.6
   name: build-docker-images-ubuntu
-  settings:
-    dry_run: true
-    edition: enterprise
-    ubuntu: true
+  volumes:
+  - name: docker
+    path: /var/run/docker.sock
 - commands:
   - dockerize -wait tcp://redis:6379/0 -timeout 120s
   - ./bin/grabpl integration-tests
@@ -3329,22 +3315,24 @@ steps:
   - package
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
-- depends_on:
+- commands:
+  - ./bin/grabpl build-docker --edition oss
+  depends_on:
   - copy-packages-for-docker
-  image: grafana/drone-grafana-docker:0.3.2
+  image: grafana/build-container:1.4.6
   name: build-docker-images
-  settings:
-    dry_run: true
-    edition: oss
-    ubuntu: false
-- depends_on:
+  volumes:
+  - name: docker
+    path: /var/run/docker.sock
+- commands:
+  - ./bin/grabpl build-docker --edition oss --ubuntu
+  depends_on:
   - copy-packages-for-docker
-  image: grafana/drone-grafana-docker:0.3.2
+  image: grafana/build-container:1.4.6
   name: build-docker-images-ubuntu
-  settings:
-    dry_run: true
-    edition: oss
-    ubuntu: true
+  volumes:
+  - name: docker
+    path: /var/run/docker.sock
 - commands:
   - yarn storybook:build
   - ./bin/grabpl verify-storybook
@@ -3754,22 +3742,24 @@ steps:
   - package
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
-- depends_on:
+- commands:
+  - ./bin/grabpl build-docker --edition enterprise
+  depends_on:
   - copy-packages-for-docker
-  image: grafana/drone-grafana-docker:0.3.2
+  image: grafana/build-container:1.4.6
   name: build-docker-images
-  settings:
-    dry_run: true
-    edition: enterprise
-    ubuntu: false
-- depends_on:
+  volumes:
+  - name: docker
+    path: /var/run/docker.sock
+- commands:
+  - ./bin/grabpl build-docker --edition enterprise --ubuntu
+  depends_on:
   - copy-packages-for-docker
-  image: grafana/drone-grafana-docker:0.3.2
+  image: grafana/build-container:1.4.6
   name: build-docker-images-ubuntu
-  settings:
-    dry_run: true
-    edition: enterprise
-    ubuntu: true
+  volumes:
+  - name: docker
+    path: /var/run/docker.sock
 - commands:
   - yarn storybook:build
   - ./bin/grabpl verify-storybook
@@ -4153,6 +4143,6 @@ kind: secret
 name: drone_token
 ---
 kind: signature
-hmac: 4a06aa0b997181006075f778d179937558cdf58f7e7912abf8c1f4f03785166d
+hmac: da515e31c32d1ea90f080af0fe863b24ec093f526792460419cec5f190e15ec8
 
 ...

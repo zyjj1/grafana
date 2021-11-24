@@ -726,26 +726,30 @@ def build_docker_images_step(edition, ver_mode, archs=None, ubuntu=False, publis
     if ver_mode == 'test-release':
         publish = False
 
+
+    cmd = './bin/grabpl build-docker --edition {}'.format(edition)
     ubuntu_sfx = ''
     if ubuntu:
         ubuntu_sfx = '-ubuntu'
+        cmd += ' --ubuntu'
 
-    settings = {
-        'dry_run': not publish,
-        'edition': edition,
-        'ubuntu': ubuntu,
-    }
-
-    if publish:
-        settings['username'] = from_secret('docker_user')
-        settings['password'] = from_secret('docker_password')
     if archs:
-        settings['archs'] = ','.join(archs)
+        cmd += ' -archs {}'.format(','.join(archs))
+
+#    if publish:
+#        settings['username'] = from_secret('docker_user')
+#        settings['password'] = from_secret('docker_password')
     return {
         'name': 'build-docker-images' + ubuntu_sfx,
-        'image': grafana_docker_image,
+        'image': build_image,
         'depends_on': ['copy-packages-for-docker'],
-        'settings': settings,
+        'commands': [
+            cmd
+        ],
+        'volumes': [{
+            'name': 'docker',
+            'path': '/var/run/docker.sock'
+        }],
     }
 
 
