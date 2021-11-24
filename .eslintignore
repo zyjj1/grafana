@@ -8,4 +8,4 @@ dist
 e2e/tmp
 public/lib/monaco
 deployment_tools_config.json
-grafana-npm-*.tgz
+**/grafana-npm-*.tgz
