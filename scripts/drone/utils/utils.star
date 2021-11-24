@@ -42,7 +42,9 @@ def pipeline(
             'temp': {},
         },{
             'name': 'docker',
-            'host': '/var/run/docker.sock',
+            'host': {
+                'path': '/var/run/docker.sock',
+            },
         }],
         'depends_on': depends_on,
     }

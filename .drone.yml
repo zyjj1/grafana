@@ -96,6 +96,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 depends_on: []
 kind: pipeline
@@ -303,6 +306,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 depends_on: []
 kind: pipeline
@@ -380,6 +386,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 depends_on: []
 kind: pipeline
@@ -777,6 +786,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 depends_on:
 - build-main
@@ -825,6 +837,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 depends_on:
 - build-main
@@ -879,6 +894,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 depends_on:
 - build-main
@@ -1265,6 +1283,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 depends_on:
 - oss-build-release
@@ -1312,6 +1333,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 clone:
   disable: true
@@ -1812,6 +1836,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 clone:
   disable: true
@@ -1880,6 +1907,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 depends_on:
 - oss-build-release
@@ -1954,6 +1984,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 depends_on:
 - oss-build-release
@@ -2322,6 +2355,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 depends_on:
 - oss-build-test-release
@@ -2370,6 +2406,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 clone:
   disable: true
@@ -2870,6 +2909,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 clone:
   disable: true
@@ -2939,6 +2981,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 depends_on:
 - oss-build-test-release
@@ -3018,6 +3063,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 depends_on:
 - oss-build-test-release
@@ -3370,6 +3418,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 depends_on:
 - oss-build-release-branch
@@ -3413,6 +3464,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 clone:
   disable: true
@@ -3917,6 +3971,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 clone:
   disable: true
@@ -3981,6 +4038,9 @@ type: docker
 volumes:
 - name: cypress_cache
   temp: {}
+- host:
+    path: /var/run/docker.sock
+  name: docker
 ---
 depends_on:
 - oss-build-release-branch
@@ -4143,6 +4203,6 @@ kind: secret
 name: drone_token
 ---
 kind: signature
-hmac: da515e31c32d1ea90f080af0fe863b24ec093f526792460419cec5f190e15ec8
+hmac: 3da140798fbf6d3332f40e0d0b1269bebcb7d3f8c56d89167dca16463ce7d68e
 
 ...
