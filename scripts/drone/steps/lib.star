@@ -299,7 +299,7 @@ def upload_cdn_step(edition):
             'GCP_GRAFANA_UPLOAD_KEY': from_secret('gcp_key'),
         },
         'commands': [
-            './bin/grabpl upload-cdn --edition {} --bucket "grafana-static-assets"'.format(edition),
+            './bin/grabpl upload-cdn --edition {} --bucket "grafana-prerelease/artifacts/static-assets"'.format(edition),
         ],
     }
 
@@ -879,7 +879,7 @@ def upload_packages_step(edition, ver_mode, is_downstream=False):
     if ver_mode == 'main' and edition in ('enterprise', 'enterprise2') and not is_downstream:
         return None
 
-    packages_bucket = ' --packages-bucket grafana-downloads' + enterprise2_suffix(edition)
+    packages_bucket = ' --packages-bucket grafana-prerelease/artifacts/downloads' + enterprise2_suffix(edition)
 
     if ver_mode == 'test-release':
         cmd = './bin/grabpl upload-packages --edition {} '.format(edition) + \
@@ -978,7 +978,7 @@ def get_windows_steps(edition, ver_mode, is_downstream=False):
         'release', 'test-release', 'release-branch',
     ):
         bucket_part = ''
-        bucket = 'grafana-downloads'
+        bucket = 'grafana-prerelease/artifacts/downloads'
         if ver_mode == 'release':
             ver_part = '${DRONE_TAG}'
             dir = 'release'

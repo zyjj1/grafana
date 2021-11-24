@@ -758,7 +758,7 @@ steps:
   image: grafana/build-container:1.4.6
   name: release-canary-npm-packages
 - commands:
-  - ./bin/grabpl upload-packages --edition oss --packages-bucket grafana-downloads
+  - ./bin/grabpl upload-packages --edition oss --packages-bucket grafana-prerelease/artifacts/downloads
   depends_on:
   - end-to-end-tests-dashboards-suite
   - end-to-end-tests-panels-suite
@@ -770,7 +770,7 @@ steps:
   image: grafana/grafana-ci-deploy:1.3.1
   name: upload-packages
 - commands:
-  - ./bin/grabpl upload-cdn --edition oss --bucket "grafana-static-assets"
+  - ./bin/grabpl upload-cdn --edition oss --bucket "grafana-prerelease/artifacts/static-assets"
   depends_on:
   - end-to-end-tests-server
   environment:
@@ -820,8 +820,8 @@ steps:
   - cp C:\App\nssm-2.24.zip .
   - .\grabpl.exe windows-installer --edition oss --build-id $$env:DRONE_BUILD_NUMBER
   - $$fname = ((Get-Childitem grafana*.msi -name) -split "`n")[0]
-  - gsutil cp $$fname gs://grafana-downloads/oss/main/
-  - gsutil cp "$$fname.sha256" gs://grafana-downloads/oss/main/
+  - gsutil cp $$fname gs://grafana-prerelease/artifacts/downloads/oss/main/
+  - gsutil cp "$$fname.sha256" gs://grafana-prerelease/artifacts/downloads/oss/main/
   depends_on:
   - initialize
   environment:
@@ -1224,7 +1224,7 @@ steps:
   image: grafana/build-container:1.4.6
   name: build-storybook
 - commands:
-  - ./bin/grabpl upload-cdn --edition oss --bucket "grafana-static-assets"
+  - ./bin/grabpl upload-cdn --edition oss --bucket "grafana-prerelease/artifacts/static-assets"
   depends_on:
   - end-to-end-tests-server
   environment:
@@ -1233,7 +1233,7 @@ steps:
   image: grafana/grafana-ci-deploy:1.3.1
   name: upload-cdn-assets
 - commands:
-  - ./bin/grabpl upload-packages --edition oss --packages-bucket grafana-downloads
+  - ./bin/grabpl upload-packages --edition oss --packages-bucket grafana-prerelease/artifacts/downloads
   depends_on:
   - end-to-end-tests-dashboards-suite
   - end-to-end-tests-panels-suite
@@ -1317,8 +1317,8 @@ steps:
   - cp C:\App\nssm-2.24.zip .
   - .\grabpl.exe windows-installer --edition oss ${DRONE_TAG}
   - $$fname = ((Get-Childitem grafana*.msi -name) -split "`n")[0]
-  - gsutil cp $$fname gs://grafana-downloads/oss/release/
-  - gsutil cp "$$fname.sha256" gs://grafana-downloads/oss/release/
+  - gsutil cp $$fname gs://grafana-prerelease/artifacts/downloads/oss/release/
+  - gsutil cp "$$fname.sha256" gs://grafana-prerelease/artifacts/downloads/oss/release/
   depends_on:
   - initialize
   environment:
@@ -1707,7 +1707,7 @@ steps:
   image: grafana/build-container:1.4.6
   name: memcached-integration-tests
 - commands:
-  - ./bin/grabpl upload-cdn --edition enterprise --bucket "grafana-static-assets"
+  - ./bin/grabpl upload-cdn --edition enterprise --bucket "grafana-prerelease/artifacts/static-assets"
   depends_on:
   - end-to-end-tests-server
   environment:
@@ -1716,7 +1716,7 @@ steps:
   image: grafana/grafana-ci-deploy:1.3.1
   name: upload-cdn-assets
 - commands:
-  - ./bin/grabpl upload-packages --edition enterprise --packages-bucket grafana-downloads
+  - ./bin/grabpl upload-packages --edition enterprise --packages-bucket grafana-prerelease/artifacts/downloads
   depends_on:
   - end-to-end-tests-dashboards-suite
   - end-to-end-tests-panels-suite
@@ -1807,7 +1807,7 @@ steps:
   - name: cypress_cache
     path: /root/.cache/Cypress
 - commands:
-  - ./bin/grabpl upload-cdn --edition enterprise2 --bucket "grafana-static-assets"
+  - ./bin/grabpl upload-cdn --edition enterprise2 --bucket "grafana-prerelease/artifacts/static-assets"
   depends_on:
   - end-to-end-tests-server-enterprise2
   environment:
@@ -1816,7 +1816,7 @@ steps:
   image: grafana/grafana-ci-deploy:1.3.1
   name: upload-cdn-assets-enterprise2
 - commands:
-  - ./bin/grabpl upload-packages --edition enterprise2 --packages-bucket grafana-downloads-enterprise2
+  - ./bin/grabpl upload-packages --edition enterprise2 --packages-bucket grafana-prerelease/artifacts/downloads-enterprise2
   depends_on:
   - end-to-end-tests-dashboards-suite-enterprise2
   - end-to-end-tests-panels-suite-enterprise2
@@ -1891,8 +1891,8 @@ steps:
   - cp C:\App\nssm-2.24.zip .
   - .\grabpl.exe windows-installer --edition enterprise ${DRONE_TAG}
   - $$fname = ((Get-Childitem grafana*.msi -name) -split "`n")[0]
-  - gsutil cp $$fname gs://grafana-downloads/enterprise/release/
-  - gsutil cp "$$fname.sha256" gs://grafana-downloads/enterprise/release/
+  - gsutil cp $$fname gs://grafana-prerelease/artifacts/downloads/enterprise/release/
+  - gsutil cp "$$fname.sha256" gs://grafana-prerelease/artifacts/downloads/enterprise/release/
   depends_on:
   - initialize
   environment:
@@ -2315,7 +2315,7 @@ steps:
   image: grafana/build-container:1.4.6
   name: build-storybook
 - commands:
-  - ./bin/grabpl upload-cdn --edition oss --bucket "grafana-static-assets"
+  - ./bin/grabpl upload-cdn --edition oss --bucket "grafana-prerelease/artifacts/static-assets"
   depends_on:
   - end-to-end-tests-server
   environment:
@@ -2780,7 +2780,7 @@ steps:
   image: grafana/build-container:1.4.6
   name: memcached-integration-tests
 - commands:
-  - ./bin/grabpl upload-cdn --edition enterprise --bucket "grafana-static-assets"
+  - ./bin/grabpl upload-cdn --edition enterprise --bucket "grafana-prerelease/artifacts/static-assets"
   depends_on:
   - end-to-end-tests-server
   environment:
@@ -2880,7 +2880,7 @@ steps:
   - name: cypress_cache
     path: /root/.cache/Cypress
 - commands:
-  - ./bin/grabpl upload-cdn --edition enterprise2 --bucket "grafana-static-assets"
+  - ./bin/grabpl upload-cdn --edition enterprise2 --bucket "grafana-prerelease/artifacts/static-assets"
   depends_on:
   - end-to-end-tests-server-enterprise2
   environment:
@@ -3391,7 +3391,7 @@ steps:
   image: grafana/build-container:1.4.6
   name: build-storybook
 - commands:
-  - ./bin/grabpl upload-cdn --edition oss --bucket "grafana-static-assets"
+  - ./bin/grabpl upload-cdn --edition oss --bucket "grafana-prerelease/artifacts/static-assets"
   depends_on:
   - end-to-end-tests-server
   environment:
@@ -3400,7 +3400,7 @@ steps:
   image: grafana/grafana-ci-deploy:1.3.1
   name: upload-cdn-assets
 - commands:
-  - ./bin/grabpl upload-packages --edition oss --packages-bucket grafana-downloads
+  - ./bin/grabpl upload-packages --edition oss --packages-bucket grafana-prerelease/artifacts/downloads
   depends_on:
   - end-to-end-tests-dashboards-suite
   - end-to-end-tests-panels-suite
@@ -3842,7 +3842,7 @@ steps:
   image: grafana/build-container:1.4.6
   name: memcached-integration-tests
 - commands:
-  - ./bin/grabpl upload-cdn --edition enterprise --bucket "grafana-static-assets"
+  - ./bin/grabpl upload-cdn --edition enterprise --bucket "grafana-prerelease/artifacts/static-assets"
   depends_on:
   - end-to-end-tests-server
   environment:
@@ -3851,7 +3851,7 @@ steps:
   image: grafana/grafana-ci-deploy:1.3.1
   name: upload-cdn-assets
 - commands:
-  - ./bin/grabpl upload-packages --edition enterprise --packages-bucket grafana-downloads
+  - ./bin/grabpl upload-packages --edition enterprise --packages-bucket grafana-prerelease/artifacts/downloads
   depends_on:
   - end-to-end-tests-dashboards-suite
   - end-to-end-tests-panels-suite
@@ -3942,7 +3942,7 @@ steps:
   - name: cypress_cache
     path: /root/.cache/Cypress
 - commands:
-  - ./bin/grabpl upload-cdn --edition enterprise2 --bucket "grafana-static-assets"
+  - ./bin/grabpl upload-cdn --edition enterprise2 --bucket "grafana-prerelease/artifacts/static-assets"
   depends_on:
   - end-to-end-tests-server-enterprise2
   environment:
@@ -3951,7 +3951,7 @@ steps:
   image: grafana/grafana-ci-deploy:1.3.1
   name: upload-cdn-assets-enterprise2
 - commands:
-  - ./bin/grabpl upload-packages --edition enterprise2 --packages-bucket grafana-downloads-enterprise2
+  - ./bin/grabpl upload-packages --edition enterprise2 --packages-bucket grafana-prerelease/artifacts/downloads-enterprise2
   depends_on:
   - end-to-end-tests-dashboards-suite-enterprise2
   - end-to-end-tests-panels-suite-enterprise2
@@ -4203,6 +4203,6 @@ kind: secret
 name: drone_token
 ---
 kind: signature
-hmac: e10f5f86a5eef815fd8f91d3f32961ed22f55ab119087665a69b99e46290dcc6
+hmac: 7d0aedbf1b9eb05099a9803c64633de6ef968ce7ca68c5fbd07ac6c6dd9d6dab
 
 ...
