@@ -51,11 +51,11 @@ load(
 )
 load('scripts/drone/vault.star', 'from_secret', 'github_token', 'pull_secret', 'drone_token')
 
-def store_npm_packages_steps(edition, ver_mode):
+def build_npm_packages_step(edition, ver_mode):
     if edition == 'enterprise' or ver_mode != 'release':
         return None
 
-    return [{
+    return {
         'name': 'build-npm-packages',
         'image': build_image,
         'depends_on': [
@@ -66,51 +66,59 @@ def store_npm_packages_steps(edition, ver_mode):
             'GCP_KEY': from_secret('gcp_key'),
         },
         'commands': ['./scripts/build/build-npm-packages.sh ${DRONE_TAG}'],
-    },
-    {
+    }
+
+def store_npm_packages_step(edition, ver_mode):
+    if edition == 'enterprise' or ver_mode != 'release':
+        return None
+
+    return {
         'name': 'store-npm-packages',
         'image': publish_image,
         'environment': {
             'GCP_KEY': from_secret('gcp_key'),
         },
         'commands': ['./scripts/build/store-npm-packages.sh ${DRONE_TAG}'],
-    }]
+    }
 
-
-def release_npm_packages_steps(edition, ver_mode):
+def retrieve_npm_packages_step(edition, ver_mode):
     if edition == 'enterprise' or ver_mode != 'release':
         return None
 
-    return [
-        {
-            'name': 'retrieve-npm-packages',
-            'image': publish_image,
-            'depends_on': [
-                # Has to run after publish-storybook since this step cleans the files publish-storybook depends on
-                'publish-storybook',
-            ],
-            'environment': {
-                'GCP_KEY': from_secret('gcp_key'),
-            },
-            'commands': ['./scripts/build/retrieve-npm-packages.sh ${DRONE_TAG}'],
+    return {
+        'name': 'retrieve-npm-packages',
+        'image': publish_image,
+        'depends_on': [
+            # Has to run after publish-storybook since this step cleans the files publish-storybook depends on
+            'publish-storybook',
+        ],
+        'environment': {
+            'GCP_KEY': from_secret('gcp_key'),
         },
-        {
-            'name': 'release-npm-packages',
-            'image': build_image,
-            'environment': {
-                'NPM_TOKEN': {
-                    'from_secret': 'npm_token',
-                },
-                'environment': {
-                'GCP_KEY': from_secret('gcp_key'),
-                },
-                'GITHUB_PACKAGE_TOKEN': {
-                    'from_secret': 'github_package_token',
-                },
+        'commands': ['./scripts/build/retrieve-npm-packages.sh ${DRONE_TAG}'],
+    }
+
+def release_npm_packages_step(edition, ver_mode):
+    if edition == 'enterprise' or ver_mode != 'release':
+        return None
+
+    return {
+        'name': 'release-npm-packages',
+        'image': build_image,
+        'environment': {
+            'NPM_TOKEN': {
+                'from_secret': 'npm_token',
             },
-            'commands': ['./scripts/build/release-npm-packages.sh ${DRONE_TAG}'],
+            'environment': {
+            'GCP_KEY': from_secret('gcp_key'),
+            },
+            'GITHUB_PACKAGE_TOKEN': {
+                'from_secret': 'github_package_token',
+            },
         },
-    ]
+        'commands': ['./scripts/build/release-npm-packages.sh ${DRONE_TAG}'],
+    }
+
 
 def get_steps(edition, ver_mode):
     build_steps = []
@@ -173,11 +181,13 @@ def get_steps(edition, ver_mode):
         publish_steps.append(upload_packages_step(edition=edition, ver_mode=ver_mode))
     if should_publish:
         publish_step = publish_storybook_step(edition=edition, ver_mode=ver_mode)
-        store_npm_steps = store_npm_packages_steps(edition=edition, ver_mode=ver_mode)
+        build_npm_step = build_npm_packages_step(edition=edition, ver_mode=ver_mode)
+        store_npm_step = store_npm_packages_step(edition=edition, ver_mode=ver_mode)
         if publish_step:
             publish_steps.append(publish_step)
-        if store_npm_steps:
-            publish_steps.extend(store_npm_steps)
+        if build_npm_step and store_npm_step:
+            publish_steps.append(build_npm_step)
+            publish_steps.append(store_npm_step)
     windows_package_steps = get_windows_steps(edition=edition, ver_mode=ver_mode)
 
     if include_enterprise2:
