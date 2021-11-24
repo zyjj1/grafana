@@ -1917,84 +1917,6 @@ depends_on:
 - enterprise-build-release
 - enterprise-windows-release
 kind: pipeline
-name: publish-release
-node:
-  type: no-parallel
-platform:
-  arch: amd64
-  os: linux
-services: []
-steps:
-- commands:
-  - mkdir -p bin
-  - curl -fL -o bin/grabpl https://grafana-downloads.storage.googleapis.com/grafana-build-pipeline/v2.7.3-malcolm1/grabpl
-  - chmod +x bin/grabpl
-  image: byrnedo/alpine-curl:0.1.8
-  name: grabpl
-- commands:
-  - echo $DRONE_RUNNER_NAME
-  image: alpine:3.14.3
-  name: identify-runner
-- commands:
-  - make gen-go
-  - ./bin/grabpl verify-version ${DRONE_TAG}
-  image: grafana/build-container:1.4.6
-  name: initialize
-- commands:
-  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
-  - ./bin/grabpl publish-packages --edition oss --gcp-key /tmp/gcpkey.json ${DRONE_TAG}
-  depends_on:
-  - initialize
-  environment:
-    GCP_KEY:
-      from_secret: gcp_key
-    GPG_KEY_PASSWORD:
-      from_secret: gpg_key_password
-    GPG_PRIV_KEY:
-      from_secret: gpg_priv_key
-    GPG_PUB_KEY:
-      from_secret: gpg_pub_key
-    GRAFANA_COM_API_KEY:
-      from_secret: grafana_api_key
-  image: grafana/grafana-ci-deploy:1.3.1
-  name: publish-packages-oss
-- commands:
-  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
-  - ./bin/grabpl publish-packages --edition enterprise --gcp-key /tmp/gcpkey.json
-    ${DRONE_TAG}
-  depends_on:
-  - initialize
-  environment:
-    GCP_KEY:
-      from_secret: gcp_key
-    GPG_KEY_PASSWORD:
-      from_secret: gpg_key_password
-    GPG_PRIV_KEY:
-      from_secret: gpg_priv_key
-    GPG_PUB_KEY:
-      from_secret: gpg_pub_key
-    GRAFANA_COM_API_KEY:
-      from_secret: grafana_api_key
-  image: grafana/grafana-ci-deploy:1.3.1
-  name: publish-packages-enterprise
-trigger:
-  ref:
-  - refs/tags/v*
-type: docker
-volumes:
-- name: cypress_cache
-  temp: {}
-- host:
-    path: /var/run/docker.sock
-  name: docker
----
-depends_on:
-- oss-build-release
-- oss-windows-release
-- enterprise-build-release
-- enterprise-windows-release
-- publish-release
-kind: pipeline
 name: notify-release
 platform:
   arch: amd64
@@ -4203,6 +4125,6 @@ kind: secret
 name: drone_token
 ---
 kind: signature
-hmac: 7d0aedbf1b9eb05099a9803c64633de6ef968ce7ca68c5fbd07ac6c6dd9d6dab
+hmac: 11536124c5d21d8b26be4c62b7eab2dff2ce1dd7dc1c2117ecffd04442c63cb9
 
 ...
