@@ -11,5 +11,5 @@ fi
 
 echo "Retrieving prerelease NPM artifacts"
 ZIPFILE=grafana-npm-${_grafana_version}.tgz
-gsutil cp gs://grafana-prerelease/artifacts/npm/$ZIPFILE $ZIPFILE
-tar -xzf $ZIPFILE
+gsutil cp "gs://grafana-prerelease/artifacts/npm/$ZIPFILE" "$ZIPFILE"
+tar -xzf "$ZIPFILE"
