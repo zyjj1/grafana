@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+GRAFANA_TAG=${1:-}
+
+if echo "$GRAFANA_TAG" | grep -q "^v"; then
+	_grafana_version=$(echo "${GRAFANA_TAG}" | cut -d "v" -f 2)
+else
+  echo "Provided tag is not a version tag, skipping packages release..."
+	exit
+fi
+
+# lerna bootstrap might have created yarn.lock
+git checkout .
+
+echo $'\nBuilding packages'
+yarn packages:build
