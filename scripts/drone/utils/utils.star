@@ -40,6 +40,9 @@ def pipeline(
         'volumes': [{
             'name': 'cypress_cache',
             'temp': {},
+        },{
+            'name': 'docker',
+            'host': '/var/run/docker.sock',
         }],
         'depends_on': depends_on,
     }
