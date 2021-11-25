@@ -1,5 +1,5 @@
-#!/usr/bin/env bash -e
-
+#!/usr/bin/env bash
+set -e
 GRAFANA_TAG=${1:-}
 
 if echo "$GRAFANA_TAG" | grep -q "^v"; then
