@@ -294,7 +294,7 @@ steps:
   - ./bin/grabpl build-docker --edition oss -archs amd64
   depends_on:
   - copy-packages-for-docker
-  image: grafana/build-container:1.4.6
+  image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
   - name: docker
@@ -731,7 +731,7 @@ steps:
   - ./bin/grabpl build-docker --edition oss
   depends_on:
   - copy-packages-for-docker
-  image: grafana/build-container:1.4.6
+  image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
   - name: docker
@@ -740,7 +740,7 @@ steps:
   - ./bin/grabpl build-docker --edition oss --ubuntu
   depends_on:
   - copy-packages-for-docker
-  image: grafana/build-container:1.4.6
+  image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images-ubuntu
   volumes:
   - name: docker
@@ -1200,7 +1200,7 @@ steps:
   - ./bin/grabpl build-docker --edition oss
   depends_on:
   - copy-packages-for-docker
-  image: grafana/build-container:1.4.6
+  image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
   - name: docker
@@ -1209,7 +1209,7 @@ steps:
   - ./bin/grabpl build-docker --edition oss --ubuntu
   depends_on:
   - copy-packages-for-docker
-  image: grafana/build-container:1.4.6
+  image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images-ubuntu
   volumes:
   - name: docker
@@ -1676,7 +1676,7 @@ steps:
   - ./bin/grabpl build-docker --edition enterprise
   depends_on:
   - copy-packages-for-docker
-  image: grafana/build-container:1.4.6
+  image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
   - name: docker
@@ -1685,7 +1685,7 @@ steps:
   - ./bin/grabpl build-docker --edition enterprise --ubuntu
   depends_on:
   - copy-packages-for-docker
-  image: grafana/build-container:1.4.6
+  image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images-ubuntu
   volumes:
   - name: docker
@@ -2215,7 +2215,7 @@ steps:
   - ./bin/grabpl build-docker --edition oss
   depends_on:
   - copy-packages-for-docker
-  image: grafana/build-container:1.4.6
+  image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
   - name: docker
@@ -2224,7 +2224,7 @@ steps:
   - ./bin/grabpl build-docker --edition oss --ubuntu
   depends_on:
   - copy-packages-for-docker
-  image: grafana/build-container:1.4.6
+  image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images-ubuntu
   volumes:
   - name: docker
@@ -2671,7 +2671,7 @@ steps:
   - ./bin/grabpl build-docker --edition enterprise
   depends_on:
   - copy-packages-for-docker
-  image: grafana/build-container:1.4.6
+  image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
   - name: docker
@@ -2680,7 +2680,7 @@ steps:
   - ./bin/grabpl build-docker --edition enterprise --ubuntu
   depends_on:
   - copy-packages-for-docker
-  image: grafana/build-container:1.4.6
+  image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images-ubuntu
   volumes:
   - name: docker
@@ -3291,7 +3291,7 @@ steps:
   - ./bin/grabpl build-docker --edition oss
   depends_on:
   - copy-packages-for-docker
-  image: grafana/build-container:1.4.6
+  image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
   - name: docker
@@ -3300,7 +3300,7 @@ steps:
   - ./bin/grabpl build-docker --edition oss --ubuntu
   depends_on:
   - copy-packages-for-docker
-  image: grafana/build-container:1.4.6
+  image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images-ubuntu
   volumes:
   - name: docker
@@ -3724,7 +3724,7 @@ steps:
   - ./bin/grabpl build-docker --edition enterprise
   depends_on:
   - copy-packages-for-docker
-  image: grafana/build-container:1.4.6
+  image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
   - name: docker
@@ -3733,7 +3733,7 @@ steps:
   - ./bin/grabpl build-docker --edition enterprise --ubuntu
   depends_on:
   - copy-packages-for-docker
-  image: grafana/build-container:1.4.6
+  image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images-ubuntu
   volumes:
   - name: docker
@@ -4127,6 +4127,6 @@ kind: secret
 name: drone_token
 ---
 kind: signature
-hmac: 20403c9443f6caf20d882a6df67b4041c4355bb0ec776ebff734ba51935a6805
+hmac: 9290c8fa7daebcd36a4538b7de89ff9e645fd8960693725fef2ca66645f51c0d
 
 ...

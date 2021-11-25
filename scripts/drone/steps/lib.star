@@ -741,7 +741,7 @@ def build_docker_images_step(edition, ver_mode, archs=None, ubuntu=False, publis
 #        settings['password'] = from_secret('docker_password')
     return {
         'name': 'build-docker-images' + ubuntu_sfx,
-        'image': build_image,
+        'image': grafana_docker_image,
         'depends_on': ['copy-packages-for-docker'],
         'commands': [
             cmd
