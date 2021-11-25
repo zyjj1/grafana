@@ -1271,6 +1271,8 @@ steps:
   name: build-npm-packages
 - commands:
   - ./scripts/build/store-npm-packages.sh ${DRONE_TAG}
+  depends_on:
+  - build-npm-packages
   environment:
     GCP_KEY:
       from_secret: gcp_key
@@ -4125,6 +4127,6 @@ kind: secret
 name: drone_token
 ---
 kind: signature
-hmac: 11536124c5d21d8b26be4c62b7eab2dff2ce1dd7dc1c2117ecffd04442c63cb9
+hmac: 20403c9443f6caf20d882a6df67b4041c4355bb0ec776ebff734ba51935a6805
 
 ...

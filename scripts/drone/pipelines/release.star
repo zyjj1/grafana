@@ -75,6 +75,9 @@ def store_npm_packages_step(edition, ver_mode):
     return {
         'name': 'store-npm-packages',
         'image': publish_image,
+        'depends_on': [
+            'build-npm-packages',
+        ],
         'environment': {
             'GCP_KEY': from_secret('gcp_key'),
         },
@@ -109,6 +112,9 @@ def release_npm_packages_step(edition, ver_mode):
             'NPM_TOKEN': {
                 'from_secret': 'npm_token',
             },
+            'depends_on': [
+                'retrieve-npm-packages',
+            ],
             'environment': {
             'GCP_KEY': from_secret('gcp_key'),
             },
