@@ -11,5 +11,8 @@ fi
 
 echo "Retrieving prerelease NPM artifacts"
 ZIPFILE=grafana-npm-${_grafana_version}.tgz
+
+echo "${GCP_KEY}" > credentials.json
+gcloud auth activate-service-account --key-file=credentials.json
 gsutil cp "gs://grafana-prerelease/artifacts/npm/$ZIPFILE" "$ZIPFILE"
 tar -xzf "$ZIPFILE"
