@@ -12,7 +12,7 @@ fi
 echo "Storing NPM artifacts"
 ZIPFILE=grafana-npm-${_grafana_version}.tgz
 tar -czf "$ZIPFILE" packages/*/dist packages/*/compiled
-        GCP_KEY
+
 echo "${GCP_KEY}" | base64 -d > credentials.json
 gcloud auth activate-service-account --key-file=credentials.json
 gsutil cp "$ZIPFILE" "gs://grafana-prerelease/artifacts/npm/$ZIPFILE"
