@@ -726,8 +726,7 @@ def build_docker_images_step(edition, ver_mode, archs=None, ubuntu=False, publis
     if ver_mode == 'test-release':
         publish = False
 
-
-    cmd = './bin/grabpl build-docker --edition {}'.format(edition)
+    cmd = './bin/grabpl build-docker --edition {} --shouldSave'.format(edition)
     ubuntu_sfx = ''
     if ubuntu:
         ubuntu_sfx = '-ubuntu'
@@ -744,12 +743,17 @@ def build_docker_images_step(edition, ver_mode, archs=None, ubuntu=False, publis
         'image': grafana_docker_image,
         'depends_on': ['copy-packages-for-docker'],
         'commands': [
+            'printenv GCP_KEY | base64 -d > /tmp/gcpkey.json',
+            'gcloud auth activate-service-account --key-file=/tmp/gcpkey.json',
             cmd
         ],
         'volumes': [{
             'name': 'docker',
             'path': '/var/run/docker.sock'
         }],
+        'environment': {
+            'GCP_KEY': from_secret('gcp_key'),
+        },
     }
 
 

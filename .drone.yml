@@ -291,9 +291,14 @@ steps:
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
 - commands:
-  - ./bin/grabpl build-docker --edition oss -archs amd64
+  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
+  - gcloud auth activate-service-account --key-file=/tmp/gcpkey.json
+  - ./bin/grabpl build-docker --edition oss --shouldSave -archs amd64
   depends_on:
   - copy-packages-for-docker
+  environment:
+    GCP_KEY:
+      from_secret: gcp_key
   image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
@@ -728,18 +733,28 @@ steps:
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
 - commands:
-  - ./bin/grabpl build-docker --edition oss
+  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
+  - gcloud auth activate-service-account --key-file=/tmp/gcpkey.json
+  - ./bin/grabpl build-docker --edition oss --shouldSave
   depends_on:
   - copy-packages-for-docker
+  environment:
+    GCP_KEY:
+      from_secret: gcp_key
   image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
   - name: docker
     path: /var/run/docker.sock
 - commands:
-  - ./bin/grabpl build-docker --edition oss --ubuntu
+  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
+  - gcloud auth activate-service-account --key-file=/tmp/gcpkey.json
+  - ./bin/grabpl build-docker --edition oss --shouldSave --ubuntu
   depends_on:
   - copy-packages-for-docker
+  environment:
+    GCP_KEY:
+      from_secret: gcp_key
   image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images-ubuntu
   volumes:
@@ -1197,18 +1212,28 @@ steps:
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
 - commands:
-  - ./bin/grabpl build-docker --edition oss
+  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
+  - gcloud auth activate-service-account --key-file=/tmp/gcpkey.json
+  - ./bin/grabpl build-docker --edition oss --shouldSave
   depends_on:
   - copy-packages-for-docker
+  environment:
+    GCP_KEY:
+      from_secret: gcp_key
   image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
   - name: docker
     path: /var/run/docker.sock
 - commands:
-  - ./bin/grabpl build-docker --edition oss --ubuntu
+  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
+  - gcloud auth activate-service-account --key-file=/tmp/gcpkey.json
+  - ./bin/grabpl build-docker --edition oss --shouldSave --ubuntu
   depends_on:
   - copy-packages-for-docker
+  environment:
+    GCP_KEY:
+      from_secret: gcp_key
   image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images-ubuntu
   volumes:
@@ -1673,18 +1698,28 @@ steps:
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
 - commands:
-  - ./bin/grabpl build-docker --edition enterprise
+  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
+  - gcloud auth activate-service-account --key-file=/tmp/gcpkey.json
+  - ./bin/grabpl build-docker --edition enterprise --shouldSave
   depends_on:
   - copy-packages-for-docker
+  environment:
+    GCP_KEY:
+      from_secret: gcp_key
   image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
   - name: docker
     path: /var/run/docker.sock
 - commands:
-  - ./bin/grabpl build-docker --edition enterprise --ubuntu
+  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
+  - gcloud auth activate-service-account --key-file=/tmp/gcpkey.json
+  - ./bin/grabpl build-docker --edition enterprise --shouldSave --ubuntu
   depends_on:
   - copy-packages-for-docker
+  environment:
+    GCP_KEY:
+      from_secret: gcp_key
   image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images-ubuntu
   volumes:
@@ -2212,18 +2247,28 @@ steps:
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
 - commands:
-  - ./bin/grabpl build-docker --edition oss
+  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
+  - gcloud auth activate-service-account --key-file=/tmp/gcpkey.json
+  - ./bin/grabpl build-docker --edition oss --shouldSave
   depends_on:
   - copy-packages-for-docker
+  environment:
+    GCP_KEY:
+      from_secret: gcp_key
   image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
   - name: docker
     path: /var/run/docker.sock
 - commands:
-  - ./bin/grabpl build-docker --edition oss --ubuntu
+  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
+  - gcloud auth activate-service-account --key-file=/tmp/gcpkey.json
+  - ./bin/grabpl build-docker --edition oss --shouldSave --ubuntu
   depends_on:
   - copy-packages-for-docker
+  environment:
+    GCP_KEY:
+      from_secret: gcp_key
   image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images-ubuntu
   volumes:
@@ -2668,18 +2713,28 @@ steps:
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
 - commands:
-  - ./bin/grabpl build-docker --edition enterprise
+  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
+  - gcloud auth activate-service-account --key-file=/tmp/gcpkey.json
+  - ./bin/grabpl build-docker --edition enterprise --shouldSave
   depends_on:
   - copy-packages-for-docker
+  environment:
+    GCP_KEY:
+      from_secret: gcp_key
   image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
   - name: docker
     path: /var/run/docker.sock
 - commands:
-  - ./bin/grabpl build-docker --edition enterprise --ubuntu
+  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
+  - gcloud auth activate-service-account --key-file=/tmp/gcpkey.json
+  - ./bin/grabpl build-docker --edition enterprise --shouldSave --ubuntu
   depends_on:
   - copy-packages-for-docker
+  environment:
+    GCP_KEY:
+      from_secret: gcp_key
   image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images-ubuntu
   volumes:
@@ -3288,18 +3343,28 @@ steps:
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
 - commands:
-  - ./bin/grabpl build-docker --edition oss
+  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
+  - gcloud auth activate-service-account --key-file=/tmp/gcpkey.json
+  - ./bin/grabpl build-docker --edition oss --shouldSave
   depends_on:
   - copy-packages-for-docker
+  environment:
+    GCP_KEY:
+      from_secret: gcp_key
   image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
   - name: docker
     path: /var/run/docker.sock
 - commands:
-  - ./bin/grabpl build-docker --edition oss --ubuntu
+  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
+  - gcloud auth activate-service-account --key-file=/tmp/gcpkey.json
+  - ./bin/grabpl build-docker --edition oss --shouldSave --ubuntu
   depends_on:
   - copy-packages-for-docker
+  environment:
+    GCP_KEY:
+      from_secret: gcp_key
   image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images-ubuntu
   volumes:
@@ -3721,18 +3786,28 @@ steps:
   image: grafana/build-container:1.4.6
   name: copy-packages-for-docker
 - commands:
-  - ./bin/grabpl build-docker --edition enterprise
+  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
+  - gcloud auth activate-service-account --key-file=/tmp/gcpkey.json
+  - ./bin/grabpl build-docker --edition enterprise --shouldSave
   depends_on:
   - copy-packages-for-docker
+  environment:
+    GCP_KEY:
+      from_secret: gcp_key
   image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images
   volumes:
   - name: docker
     path: /var/run/docker.sock
 - commands:
-  - ./bin/grabpl build-docker --edition enterprise --ubuntu
+  - printenv GCP_KEY | base64 -d > /tmp/gcpkey.json
+  - gcloud auth activate-service-account --key-file=/tmp/gcpkey.json
+  - ./bin/grabpl build-docker --edition enterprise --shouldSave --ubuntu
   depends_on:
   - copy-packages-for-docker
+  environment:
+    GCP_KEY:
+      from_secret: gcp_key
   image: grafana/drone-grafana-docker:0.3.2
   name: build-docker-images-ubuntu
   volumes:
@@ -4127,6 +4202,6 @@ kind: secret
 name: drone_token
 ---
 kind: signature
-hmac: 9290c8fa7daebcd36a4538b7de89ff9e645fd8960693725fef2ca66645f51c0d
+hmac: e53f213f586850200c7c3687ce947f43499b06584c8eb2242309acfa936d4740
 
 ...
