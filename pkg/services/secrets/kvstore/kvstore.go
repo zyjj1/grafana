@@ -4,8 +4,10 @@ import (
 	"context"
 
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/plugins"
 	"github.com/grafana/grafana/pkg/services/secrets"
 	"github.com/grafana/grafana/pkg/services/sqlstore"
+	"github.com/grafana/grafana/pkg/setting"
 )
 
 const (
@@ -13,11 +15,20 @@ const (
 	AllOrganizations = -1
 )
 
-func ProvideService(sqlStore sqlstore.Store, secretsService secrets.Service) SecretsKVStore {
+func ProvideService(sqlStore sqlstore.Store, secretsService secrets.Service, cfg setting.Cfg, sm plugins.SecretsManager) SecretsKVStore {
+	logger := log.New("secrets.kvstore")
+	usePlugin := cfg.SectionWithEnvOverrides("secrets").Key("use_plugin").MustBool()
+	if usePlugin {
+		return &secretsKVStorePlugin{
+			pluginInfo:     sm.Manager(),
+			secretsService: secretsService,
+			log:            logger,
+		}
+	}
 	return &secretsKVStoreSQL{
 		sqlStore:       sqlStore,
 		secretsService: secretsService,
-		log:            log.New("secrets.kvstore"),
+		log:            logger,
 		decryptionCache: decryptionCache{
 			cache: make(map[int64]cachedDecrypted),
 		},

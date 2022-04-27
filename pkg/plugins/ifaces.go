@@ -60,6 +60,11 @@ type RendererManager interface {
 	Renderer() *Plugin
 }
 
+type SecretsManager interface {
+	// Renderer returns a renderer plugin.
+	Manager() *Plugin
+}
+
 type StaticRouteResolver interface {
 	Routes() []*StaticRoute
 }
