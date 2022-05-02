@@ -36,7 +36,7 @@ var (
 )
 
 const (
-	randomNs         = "random-ns"
+	randomNs         = "random///ns"
 	randomNs2        = "random-ns-new"
 	randomType       = "random-type"
 	AllOrganizations = -1

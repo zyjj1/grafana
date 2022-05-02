@@ -244,14 +244,19 @@ func (s *server) DoesSecretExist(ctx context.Context, sr *pb.SecretsRequest) (bo
 
 // Returns key in the format <ns>///<type>///<org>
 func getFormattedSecretName(sr *pb.SecretsRequest) *string {
-	str := fmt.Sprintf("%s%s%s%s%d", sr.Namespace, KeySeparator, sr.Type, KeySeparator, sr.OrgId)
+	str := fmt.Sprintf("%s%s%s%s%d", sanitizeComponent(sr.Namespace), KeySeparator, sanitizeComponent(sr.Type), KeySeparator, sr.OrgId)
 	return &str
 }
 
 // Returns key in the format <new-ns>///<type>///<org>
 func getFormattedSecretUpdatedName(sr *pb.SecretsRequest) *string {
-	str := fmt.Sprintf("%s%s%s%s%d", sr.NewNamespace, KeySeparator, sr.Type, KeySeparator, sr.OrgId)
+	str := fmt.Sprintf("%s%s%s%s%d", sanitizeComponent(sr.NewNamespace), KeySeparator, sanitizeComponent(sr.Type), KeySeparator, sr.OrgId)
 	return &str
+}
+
+// Replaces all instances of the key separator '///' with '-'
+func sanitizeComponent(c string) string {
+	return strings.ReplaceAll(c, KeySeparator, "-")
 }
 
 // Returns search key for ListSecrets call. either <ns>///<type> or <new-ns>///<type>///<org>
