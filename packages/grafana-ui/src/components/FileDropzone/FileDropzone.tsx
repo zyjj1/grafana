@@ -1,10 +1,13 @@
 import { css, cx } from '@emotion/css';
-import { GrafanaTheme2 } from '@grafana/data';
 import { uniqueId } from 'lodash';
 import React, { ReactNode, useCallback, useState } from 'react';
 import { DropEvent, DropzoneOptions, FileRejection, useDropzone } from 'react-dropzone';
+
+import { GrafanaTheme2 } from '@grafana/data';
+
 import { useTheme2 } from '../../themes';
 import { Icon } from '../Icon/Icon';
+
 import { FileListItem } from './FileListItem';
 
 export interface FileDropzoneProps {
@@ -135,14 +138,21 @@ export function FileDropzone({ options, children, readAs, onLoad, fileListRender
   const removeFile = (file: DropzoneFile) => {
     const newFiles = files.filter((f) => file.id !== f.id);
     setFiles(newFiles);
+<<<<<<< HEAD
     onFileRemove && onFileRemove(file);
+=======
+    onFileRemove?.(file);
+>>>>>>> main
   };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     ...options,
     useFsAccessApi: false,
     onDrop,
+<<<<<<< HEAD
     accept: options?.accept,
+=======
+>>>>>>> main
   });
   const theme = useTheme2();
   const styles = getStyles(theme, isDragActive);

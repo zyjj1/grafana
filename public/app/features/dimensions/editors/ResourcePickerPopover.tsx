@@ -1,13 +1,20 @@
-import React, { createRef, useState } from 'react';
 import { css } from '@emotion/css';
-import { Button, ButtonGroup, useStyles2 } from '@grafana/ui';
-import { GrafanaTheme2 } from '@grafana/data';
-import { FocusScope } from '@react-aria/focus';
 import { useDialog } from '@react-aria/dialog';
+import { FocusScope } from '@react-aria/focus';
 import { useOverlay } from '@react-aria/overlays';
+<<<<<<< HEAD
+=======
+import React, { createRef, useState } from 'react';
+
+import { GrafanaTheme2 } from '@grafana/data';
+import { getBackendSrv } from '@grafana/runtime';
+import { Button, ButtonGroup, useStyles2 } from '@grafana/ui';
+>>>>>>> main
 import { config } from 'app/core/config';
 
 import { MediaType, PickerTabType, ResourceFolderName } from '../types';
+
+import { FileUploader } from './FileUploader';
 import { FolderPickerTab } from './FolderPickerTab';
 import { URLPickerTab } from './URLPickerTab';
 import { FileUploader } from './FileUploader';
@@ -18,6 +25,9 @@ interface Props {
   folderName: ResourceFolderName;
 }
 
+interface ErrorResponse {
+  message: string;
+}
 export const ResourcePickerPopover = (props: Props) => {
   const { value, onChange, mediaType, folderName } = props;
   const styles = useStyles2(getStyles);
@@ -34,6 +44,10 @@ export const ResourcePickerPopover = (props: Props) => {
   const [activePicker, setActivePicker] = useState<PickerTabType>(PickerTabType.Folder);
   const [formData, setFormData] = useState<FormData>(new FormData());
   const [upload, setUpload] = useState<boolean>(false);
+<<<<<<< HEAD
+=======
+  const [error, setError] = useState<ErrorResponse>({ message: '' });
+>>>>>>> main
 
   const getTabClassName = (tabName: PickerTabType) => {
     return `${styles.resourcePickerPopoverTab} ${activePicker === tabName && styles.resourcePickerPopoverActiveTab}`;
@@ -59,10 +73,17 @@ export const ResourcePickerPopover = (props: Props) => {
   const renderUploader = () => (
     <FileUploader
       mediaType={mediaType}
+<<<<<<< HEAD
       setNewValue={setNewValue}
       setFormData={setFormData}
       setUpload={setUpload}
       getRequest={getRequest}
+=======
+      setFormData={setFormData}
+      setUpload={setUpload}
+      newValue={newValue}
+      error={error}
+>>>>>>> main
     />
   );
   const renderPicker = () => {
@@ -114,9 +135,34 @@ export const ResourcePickerPopover = (props: Props) => {
                 variant={newValue && newValue !== value ? 'primary' : 'secondary'}
                 onClick={() => {
                   if (upload) {
+<<<<<<< HEAD
                     getRequest(formData);
                   }
                   onChange(newValue);
+=======
+                    fetch('/api/storage/upload', {
+                      method: 'POST',
+                      body: formData,
+                    })
+                      .then((res) => {
+                        if (res.status >= 400) {
+                          res.json().then((data) => setError(data));
+                          return;
+                        } else {
+                          return res.json();
+                        }
+                      })
+                      .then((data) => {
+                        getBackendSrv()
+                          .get(`api/storage/read/${data.path}`)
+                          .then(() => setNewValue(`${config.appUrl}api/storage/read/${data.path}`))
+                          .then(() => onChange(`${config.appUrl}api/storage/read/${data.path}`));
+                      })
+                      .catch((err) => console.error(err));
+                  } else {
+                    onChange(newValue);
+                  }
+>>>>>>> main
                 }}
               >
                 Select

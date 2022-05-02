@@ -93,6 +93,7 @@ func (*OSSMigrations) AddMigration(mg *Migrator) {
 			addDbFileStorageMigration(mg)
 		}
 	}
+	addEntityEventsTableMigration(mg)
 }
 
 func addMigrationLogMigrations(mg *Migrator) {
