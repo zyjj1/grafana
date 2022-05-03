@@ -53,11 +53,10 @@ type server struct {
 	pb.UnimplementedRemoteSecretsManagerServer
 }
 
+// Implement server Get func
 func (s *server) Get(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsGetResponse, error) {
 	fmt.Println("received secrets GET request", sr)
-	out, err := sm.GetSecretValueWithContext(ctx, &secretsmanager.GetSecretValueInput{
-		SecretId: getFormattedSecretName(sr),
-	})
+	out, err := s.PerformGetSecret(ctx, getFormattedSecretName(sr))
 	if err != nil {
 		switch e := err.(type) {
 		case *secretsmanager.ResourceNotFoundException:
@@ -82,10 +81,12 @@ func (s *server) Get(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsGet
 		DecryptedValue: decryptedValue,
 	}, nil
 }
+
+// Implement server Set func
 func (s *server) Set(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsErrorResponse, error) {
 	fmt.Println("received secrets SET request", sr)
 
-	exists, err := s.SecretExists(ctx, sr)
+	exists, err := s.DoesSecretExist(ctx, sr)
 	if err != nil {
 		return &pb.SecretsErrorResponse{
 			Error: err.Error(),
@@ -93,43 +94,45 @@ func (s *server) Set(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsErr
 	}
 	if exists {
 		fmt.Printf("Secret with name %s exists already, updating it", *getFormattedSecretName(sr))
-		return s.UpdateSecret(ctx, sr)
+		_, err = s.PerformUpdateSecret(ctx, getFormattedSecretName(sr), encryptValue(sr.Value))
 	} else {
 		fmt.Printf("Secret with name %s does not exist yet, creating a new one", *getFormattedSecretName(sr))
-		return s.CreateSecret(ctx, sr)
+		_, err = s.PerformCreateSecret(ctx, getFormattedSecretName(sr), encryptValue(sr.Value))
 	}
-}
-func (s *server) Del(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsErrorResponse, error) {
-	fmt.Println("received secrets DEL request", sr)
-	out3, err := sm.DeleteSecretWithContext(ctx, &secretsmanager.DeleteSecretInput{
-		// ForceDeleteWithoutRecovery: aws.Bool(true),
-		RecoveryWindowInDays: aws.Int64(7), // TODO Determine if we can just force delete without recovery
-		SecretId:             getFormattedSecretName(sr),
-	})
 	if err != nil {
+		fmt.Println("Error in set", err.Error())
 		return &pb.SecretsErrorResponse{
 			Error: err.Error(),
 		}, err
 	}
-	fmt.Println("Deleted secret with Name", out3.Name)
 	return &pb.SecretsErrorResponse{
 		Error: "",
 	}, nil
 }
 
+// Implement server Del func
+func (s *server) Del(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsErrorResponse, error) {
+	fmt.Println("received secrets DEL request", sr)
+	out, err := s.PerformDeleteSecret(ctx, getFormattedSecretName(sr))
+	if err != nil {
+		return &pb.SecretsErrorResponse{
+			Error: err.Error(),
+		}, err
+	}
+	fmt.Println("Deleted secret with Name", out.Name)
+	return &pb.SecretsErrorResponse{
+		Error: "",
+	}, nil
+}
+
+// Implement server Keys func
 func (s *server) Keys(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsKeysResponse, error) {
 	fmt.Println("received secrets KEYS request", sr)
-	var keys []*pb.Key = make([]*pb.Key, 0)
-	input := &secretsmanager.ListSecretsInput{
-		Filters: []*secretsmanager.Filter{{
-			Key:    aws.String("name"),
-			Values: []*string{getFormattedKeyPrefix(sr)},
-		}},
+	filter := &secretsmanager.Filter{
+		Key:    aws.String("name"),
+		Values: []*string{getFormattedKeyPrefix(sr)},
 	}
-	err := sm.ListSecretsPagesWithContext(ctx, input, func(out *secretsmanager.ListSecretsOutput, lastPage bool) bool {
-		mapSecretEntriesToKeys(out.SecretList, &keys)
-		return !lastPage
-	})
+	keys, err := s.PerformListKeys(ctx, filter)
 	if err != nil {
 		return &pb.SecretsKeysResponse{
 			Error: err.Error(),
@@ -141,13 +144,11 @@ func (s *server) Keys(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsKe
 	}, nil
 }
 
-// TODO refactor so that we have more function re-use
+// Implement server Rename func
 func (s *server) Rename(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsErrorResponse, error) {
 	fmt.Println("received secrets RENAME request", sr)
 	// First get the old secret
-	out, err := sm.GetSecretValueWithContext(ctx, &secretsmanager.GetSecretValueInput{
-		SecretId: getFormattedSecretName(sr),
-	})
+	getOut, err := s.PerformGetSecret(ctx, getFormattedSecretName(sr))
 	if err != nil {
 		return &pb.SecretsErrorResponse{
 			Error: err.Error(),
@@ -155,62 +156,75 @@ func (s *server) Rename(ctx context.Context, sr *pb.SecretsRequest) (*pb.Secrets
 	}
 
 	// Then create a new secret with the updated name
-	out2, err := sm.CreateSecretWithContext(ctx, &secretsmanager.CreateSecretInput{
-		Name:         getFormattedSecretUpdatedName(sr),
-		SecretString: out.SecretString,
-		Description:  aws.String("Random secret used for testing aws plugin"),
-	})
+	createOut, err := s.PerformCreateSecret(ctx, getFormattedSecretUpdatedName(sr), *getOut.SecretString)
 	if err != nil {
 		return &pb.SecretsErrorResponse{
 			Error: err.Error(),
 		}, err
 	}
-	fmt.Println("Secret created with ARN", out2.ARN)
+	fmt.Println("Secret created with ARN", createOut.ARN)
 
 	// Then delete the old secret
-	delRes, err := s.Del(ctx, sr)
+	_, err = s.PerformDeleteSecret(ctx, getFormattedSecretName(sr))
 	if err != nil {
-		fmt.Println("Error in rename function, failed to delete key with name", out.Name)
+		fmt.Println("Error in rename function, failed to delete key with name", getOut.Name)
+		return &pb.SecretsErrorResponse{
+			Error: err.Error(),
+		}, err
 	}
-	return delRes, err
+	return &pb.SecretsErrorResponse{
+		Error: "",
+	}, nil
 }
 
 // Not part of the interface impl, just helper functions
 
-func (s *server) CreateSecret(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsErrorResponse, error) {
-	out, err := sm.CreateSecretWithContext(ctx, &secretsmanager.CreateSecretInput{
-		Name:         getFormattedSecretName(sr),
-		SecretString: aws.String(encryptValue(sr.Value)),
+// Perform GetSecretValueWithContext request to AWS and return the raw response
+func (s *server) PerformGetSecret(ctx context.Context, formattedName *string) (*secretsmanager.GetSecretValueOutput, error) {
+	return sm.GetSecretValueWithContext(ctx, &secretsmanager.GetSecretValueInput{
+		SecretId: formattedName,
+	})
+}
+
+// Perform CreateSecretWithContext request to AWS and return the raw response
+func (s *server) PerformCreateSecret(ctx context.Context, formattedName *string, encryptedValue string) (*secretsmanager.CreateSecretOutput, error) {
+	return sm.CreateSecretWithContext(ctx, &secretsmanager.CreateSecretInput{
+		Name:         formattedName,
+		SecretString: aws.String(encryptedValue),
 		Description:  aws.String("Random secret used for testing aws plugin"),
 	})
-	if err != nil {
-		return &pb.SecretsErrorResponse{
-			Error: err.Error(),
-		}, err
-	}
-	fmt.Println("Secret created with ARN", out.ARN)
-	return &pb.SecretsErrorResponse{
-		Error: "",
-	}, nil
 }
 
-func (s *server) UpdateSecret(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsErrorResponse, error) {
-	out, err := sm.UpdateSecretWithContext(ctx, &secretsmanager.UpdateSecretInput{
-		SecretId:     getFormattedSecretName(sr),
-		SecretString: aws.String(encryptValue(sr.Value)),
+// Perform UpdateSecretWithContext request to AWS and return the raw response
+func (s *server) PerformUpdateSecret(ctx context.Context, formattedName *string, encryptedValue string) (*secretsmanager.UpdateSecretOutput, error) {
+	return sm.UpdateSecretWithContext(ctx, &secretsmanager.UpdateSecretInput{
+		SecretId:     formattedName,
+		SecretString: aws.String(encryptedValue),
 	})
-	if err != nil {
-		return &pb.SecretsErrorResponse{
-			Error: err.Error(),
-		}, err
-	}
-	fmt.Println("Secret updated with ARN", out.ARN)
-	return &pb.SecretsErrorResponse{
-		Error: "",
-	}, nil
 }
 
-func (s *server) SecretExists(ctx context.Context, sr *pb.SecretsRequest) (bool, error) {
+// Perform GetSecretValueWithContext request to AWS and return the raw response
+func (s *server) PerformDeleteSecret(ctx context.Context, formattedName *string) (*secretsmanager.DeleteSecretOutput, error) {
+	return sm.DeleteSecretWithContext(ctx, &secretsmanager.DeleteSecretInput{
+		// ForceDeleteWithoutRecovery: aws.Bool(true),
+		RecoveryWindowInDays: aws.Int64(7), // TODO Determine if we can just force delete without recovery
+		SecretId:             formattedName,
+	})
+}
+
+func (s *server) PerformListKeys(ctx context.Context, nameFilter *secretsmanager.Filter) ([]*pb.Key, error) {
+	var keys []*pb.Key = make([]*pb.Key, 0)
+	input := &secretsmanager.ListSecretsInput{
+		Filters: []*secretsmanager.Filter{nameFilter},
+	}
+	return keys, sm.ListSecretsPagesWithContext(ctx, input, func(out *secretsmanager.ListSecretsOutput, lastPage bool) bool {
+		mapSecretEntriesToKeys(out.SecretList, &keys)
+		return !lastPage
+	})
+}
+
+// Perform DescribeSecretWithContext request to AWS. Returns false if there is a ResourceNotFoundException
+func (s *server) DoesSecretExist(ctx context.Context, sr *pb.SecretsRequest) (bool, error) {
 	_, err := sm.DescribeSecretWithContext(ctx, &secretsmanager.DescribeSecretInput{
 		SecretId: getFormattedSecretName(sr),
 	})
@@ -226,16 +240,26 @@ func (s *server) SecretExists(ctx context.Context, sr *pb.SecretsRequest) (bool,
 	return true, nil
 }
 
+// Utility functions
+
+// Returns key in the format <ns>///<type>///<org>
 func getFormattedSecretName(sr *pb.SecretsRequest) *string {
-	str := fmt.Sprintf("%s%s%s%s%d", sr.Namespace, KeySeparator, sr.Type, KeySeparator, sr.OrgId)
+	str := fmt.Sprintf("%s%s%s%s%d", sanitizeComponent(sr.Namespace), KeySeparator, sanitizeComponent(sr.Type), KeySeparator, sr.OrgId)
 	return &str
 }
 
+// Returns key in the format <new-ns>///<type>///<org>
 func getFormattedSecretUpdatedName(sr *pb.SecretsRequest) *string {
-	str := fmt.Sprintf("%s%s%s%s%d", sr.NewNamespace, KeySeparator, sr.Type, KeySeparator, sr.OrgId)
+	str := fmt.Sprintf("%s%s%s%s%d", sanitizeComponent(sr.NewNamespace), KeySeparator, sanitizeComponent(sr.Type), KeySeparator, sr.OrgId)
 	return &str
 }
 
+// Replaces all instances of the key separator '///' with '-'
+func sanitizeComponent(c string) string {
+	return strings.ReplaceAll(c, KeySeparator, "-")
+}
+
+// Returns search key for ListSecrets call. either <ns>///<type> or <new-ns>///<type>///<org>
 func getFormattedKeyPrefix(sr *pb.SecretsRequest) *string {
 	str := fmt.Sprintf("%s%s%s%s", sr.Namespace, KeySeparator, sr.Type, KeySeparator)
 	if sr.OrgId != AllOrganizations {
@@ -244,6 +268,7 @@ func getFormattedKeyPrefix(sr *pb.SecretsRequest) *string {
 	return &str
 }
 
+// Returns a Key struct containing the namespace, type, and orgId extracted from the provided key
 func getKeyForFormattedSecretName(name string) (*pb.Key, error) {
 	sp := strings.Split(name, KeySeparator)
 	ns := sp[0]
@@ -259,10 +284,12 @@ func getKeyForFormattedSecretName(name string) (*pb.Key, error) {
 	}, nil
 }
 
+// Base64 encodes a value
 func encryptValue(val string) string {
 	return base64.StdEncoding.EncodeToString([]byte(val))
 }
 
+// Base64 decodes a value
 func decryptValue(val string) (string, error) {
 	rawBytes, err := base64.StdEncoding.DecodeString(val)
 	if err != nil {
@@ -271,6 +298,7 @@ func decryptValue(val string) (string, error) {
 	return string(rawBytes), nil
 }
 
+// Converts the ListSercrets output into Keys and adds them to the provided slice
 func mapSecretEntriesToKeys(sl []*secretsmanager.SecretListEntry, keysPtr *[]*pb.Key) {
 	keys := *keysPtr
 	for _, entry := range sl {
