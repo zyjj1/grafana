@@ -5,15 +5,15 @@ import (
 	"fmt"
 
 	"github.com/grafana/grafana/pkg/infra/log"
-	"github.com/grafana/grafana/pkg/plugins"
 	"github.com/grafana/grafana/pkg/plugins/backendplugin/secretsmanagerplugin"
+	pb "github.com/grafana/grafana/pkg/plugins/backendplugin/secretsmanagerplugin"
 	"github.com/grafana/grafana/pkg/services/secrets"
 )
 
 // secretsKVStorePlugin provides a key/value store backed by the Grafana plugin gRPC interface
 type secretsKVStorePlugin struct {
 	log            log.Logger
-	pluginInfo     *plugins.Plugin
+	client         pb.RemoteSecretsManagerClient
 	secretsService secrets.Service
 }
 
@@ -25,7 +25,7 @@ func (kv *secretsKVStorePlugin) Get(ctx context.Context, orgId int64, namespace 
 		Type:      typ,
 	}
 
-	res, err := kv.pluginInfo.SecretsManager.Get(ctx, req)
+	res, err := kv.client.Get(ctx, req)
 	if err == nil && res.Error != "" {
 		err = fmt.Errorf(res.Error)
 	}
@@ -42,7 +42,7 @@ func (kv *secretsKVStorePlugin) Set(ctx context.Context, orgId int64, namespace 
 		Value:     value,
 	}
 
-	res, err := kv.pluginInfo.SecretsManager.Set(ctx, req)
+	res, err := kv.client.Set(ctx, req)
 	if err == nil && res.Error != "" {
 		err = fmt.Errorf(res.Error)
 	}
@@ -58,7 +58,7 @@ func (kv *secretsKVStorePlugin) Del(ctx context.Context, orgId int64, namespace 
 		Type:      typ,
 	}
 
-	res, err := kv.pluginInfo.SecretsManager.Del(ctx, req)
+	res, err := kv.client.Del(ctx, req)
 	if err == nil && res.Error != "" {
 		err = fmt.Errorf(res.Error)
 	}
@@ -75,7 +75,7 @@ func (kv *secretsKVStorePlugin) Keys(ctx context.Context, orgId int64, namespace
 		Type:      typ,
 	}
 
-	res, err := kv.pluginInfo.SecretsManager.Keys(ctx, req)
+	res, err := kv.client.Keys(ctx, req)
 	if err == nil && res.Error != "" {
 		err = fmt.Errorf(res.Error)
 	}
@@ -92,7 +92,7 @@ func (kv *secretsKVStorePlugin) Rename(ctx context.Context, orgId int64, namespa
 		NewNamespace: newNamespace,
 	}
 
-	res, err := kv.pluginInfo.SecretsManager.Rename(ctx, req)
+	res, err := kv.client.Rename(ctx, req)
 	if err == nil && res.Error != "" {
 		err = fmt.Errorf(res.Error)
 	}

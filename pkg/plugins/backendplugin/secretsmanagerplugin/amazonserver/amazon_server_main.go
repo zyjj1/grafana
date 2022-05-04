@@ -30,7 +30,6 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/secretsmanager"
 	pb "github.com/grafana/grafana/pkg/plugins/backendplugin/secretsmanagerplugin"
@@ -316,8 +315,8 @@ func main() {
 	flag.Parse()
 
 	mySession := session.Must(session.NewSession())
-	sm = secretsmanager.New(mySession, aws.NewConfig().WithRegion("us-east-2").WithLogLevel(aws.LogDebug).WithCredentials(
-		credentials.NewSharedCredentials("/Users/mmandrus/dev/aws-cli_accessKeys.csv", "default")))
+	sm = secretsmanager.New(mySession, aws.NewConfig().WithRegion("us-east-2").WithLogLevel(aws.LogDebug))
+	// .WithCredentials(credentials.NewSharedCredentials("/Users/mmandrus/dev/aws-cli_accessKeys.csv", "default")))
 	// cred file should look like:
 	// [default]
 	// aws_access_key_id=YOURACCESSKEYID

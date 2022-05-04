@@ -2,12 +2,16 @@ package kvstore
 
 import (
 	"context"
+	"flag"
+	"fmt"
 
 	"github.com/grafana/grafana/pkg/infra/log"
-	"github.com/grafana/grafana/pkg/plugins"
+	pb "github.com/grafana/grafana/pkg/plugins/backendplugin/secretsmanagerplugin"
 	"github.com/grafana/grafana/pkg/services/secrets"
 	"github.com/grafana/grafana/pkg/services/sqlstore"
 	"github.com/grafana/grafana/pkg/setting"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
@@ -15,12 +19,24 @@ const (
 	AllOrganizations = -1
 )
 
-func ProvideService(sqlStore sqlstore.Store, secretsService secrets.Service, cfg setting.Cfg, sm plugins.SecretsManager) SecretsKVStore {
+var (
+	addr = flag.String("addr", "localhost:50051", "the address to connect to")
+)
+
+func ProvideService(sqlStore sqlstore.Store, secretsService secrets.Service, cfg *setting.Cfg) SecretsKVStore {
 	logger := log.New("secrets.kvstore")
 	usePlugin := cfg.SectionWithEnvOverrides("secrets").Key("use_plugin").MustBool()
+	fmt.Print("\n\n\n", usePlugin, "\n\n\n")
 	if usePlugin {
+		conn, err := grpc.Dial(*addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			logger.Error("did not connect: %v", err)
+		}
+		// defer conn.Close()
+		c := pb.NewRemoteSecretsManagerClient(conn)
+
 		return &secretsKVStorePlugin{
-			pluginInfo:     sm.Manager(),
+			client:         c,
 			secretsService: secretsService,
 			log:            logger,
 		}
