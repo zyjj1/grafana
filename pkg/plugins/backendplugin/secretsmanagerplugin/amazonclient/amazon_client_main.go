@@ -36,10 +36,9 @@ var (
 )
 
 const (
-	randomNs         = "random///ns"
-	randomNs2        = "random-ns-new"
-	randomType       = "random-type"
-	AllOrganizations = -1
+	randomNs   = "random///ns"
+	randomNs2  = "random-ns-new"
+	randomType = "random-type"
 )
 
 func main() {
@@ -60,11 +59,13 @@ func main() {
 
 	// Create a new key
 	fmt.Println("Step 1: create a new key with value \"my value\"")
-	res, err := c.Set(ctx, &pb.SecretsRequest{
-		OrgId:     orgId,
-		Namespace: randomNs,
-		Type:      randomType,
-		Value:     "my value",
+	res, err := c.Set(ctx, &pb.SecretsSetRequest{
+		KeyDescriptor: &pb.Key{
+			OrgId:     orgId,
+			Namespace: randomNs,
+			Type:      randomType,
+		},
+		Value: "my value",
 	})
 	if err != nil {
 		fmt.Println("error", err.Error())
@@ -75,10 +76,12 @@ func main() {
 
 	// Retrieve the key
 	fmt.Println("Step 2: retrieve the key, should have value \"my value\"")
-	res2, err := c.Get(ctx, &pb.SecretsRequest{
-		OrgId:     orgId,
-		Namespace: randomNs,
-		Type:      randomType,
+	res2, err := c.Get(ctx, &pb.SecretsGetRequest{
+		KeyDescriptor: &pb.Key{
+			OrgId:     orgId,
+			Namespace: randomNs,
+			Type:      randomType,
+		},
 	})
 	if err != nil {
 		fmt.Println("error", err.Error())
@@ -89,10 +92,12 @@ func main() {
 
 	// List the keys for all orgs
 	fmt.Println("Step 3: list keys for all orgs, should see our key with orgId", orgId)
-	res3, err := c.Keys(ctx, &pb.SecretsRequest{
-		OrgId:     AllOrganizations,
-		Namespace: randomNs,
-		Type:      randomType,
+	res3, err := c.Keys(ctx, &pb.SecretsKeysRequest{
+		KeyDescriptor: &pb.Key{
+			Namespace: randomNs,
+			Type:      randomType,
+		},
+		AllOrganizations: true,
 	})
 	if err != nil {
 		fmt.Println("error", err.Error())
@@ -103,11 +108,13 @@ func main() {
 
 	// Update the key value
 	fmt.Println("Step 4: update the key with new value \"my NEW value\"")
-	res4, err := c.Set(ctx, &pb.SecretsRequest{
-		OrgId:     orgId,
-		Namespace: randomNs,
-		Type:      randomType,
-		Value:     "my NEW value",
+	res4, err := c.Set(ctx, &pb.SecretsSetRequest{
+		KeyDescriptor: &pb.Key{
+			OrgId:     orgId,
+			Namespace: randomNs,
+			Type:      randomType,
+		},
+		Value: "my NEW value",
 	})
 	if err != nil {
 		fmt.Println("error", err.Error())
@@ -118,10 +125,12 @@ func main() {
 
 	// Get the key, should be updated
 	fmt.Println("Step 5: retrieve the key, which should now have value \"my NEW value\"")
-	res5, err := c.Get(ctx, &pb.SecretsRequest{
-		OrgId:     orgId,
-		Namespace: randomNs,
-		Type:      randomType,
+	res5, err := c.Get(ctx, &pb.SecretsGetRequest{
+		KeyDescriptor: &pb.Key{
+			OrgId:     orgId,
+			Namespace: randomNs,
+			Type:      randomType,
+		},
 	})
 	if err != nil {
 		fmt.Println("error", err.Error())
@@ -132,10 +141,12 @@ func main() {
 
 	// Rename the key
 	fmt.Println("Step 6: rename our key with updated namespace", randomNs2)
-	res6, err := c.Rename(ctx, &pb.SecretsRequest{
-		OrgId:        orgId,
-		Namespace:    randomNs,
-		Type:         randomType,
+	res6, err := c.Rename(ctx, &pb.SecretsRenameRequest{
+		KeyDescriptor: &pb.Key{
+			OrgId:     orgId,
+			Namespace: randomNs,
+			Type:      randomType,
+		},
 		NewNamespace: randomNs2,
 	})
 	if err != nil {
@@ -147,10 +158,12 @@ func main() {
 
 	// Get the key with the new name, should have new val
 	fmt.Println("Step 7: retrieve the key with the new namespace, should still be \"my NEW value\"")
-	res7, err := c.Get(ctx, &pb.SecretsRequest{
-		OrgId:     orgId,
-		Namespace: randomNs2,
-		Type:      randomType,
+	res7, err := c.Get(ctx, &pb.SecretsGetRequest{
+		KeyDescriptor: &pb.Key{
+			OrgId:     orgId,
+			Namespace: randomNs2,
+			Type:      randomType,
+		},
 	})
 	if err != nil {
 		fmt.Println("error", err.Error())
@@ -161,10 +174,12 @@ func main() {
 
 	// List the keys for our org
 	fmt.Println("Step 8: list the keys for our org and the new namespace, should have one still")
-	res8, err := c.Keys(ctx, &pb.SecretsRequest{
-		OrgId:     orgId,
-		Namespace: randomNs2,
-		Type:      randomType,
+	res8, err := c.Keys(ctx, &pb.SecretsKeysRequest{
+		KeyDescriptor: &pb.Key{
+			OrgId:     orgId,
+			Namespace: randomNs2,
+			Type:      randomType,
+		},
 	})
 	if err != nil {
 		fmt.Println("error", err.Error())
@@ -175,10 +190,12 @@ func main() {
 
 	// Delete our key
 	fmt.Println("Step 9: delete the key with the new namespace")
-	res9, err := c.Del(ctx, &pb.SecretsRequest{
-		OrgId:     orgId,
-		Namespace: randomNs2,
-		Type:      randomType,
+	res9, err := c.Del(ctx, &pb.SecretsDelRequest{
+		KeyDescriptor: &pb.Key{
+			OrgId:     orgId,
+			Namespace: randomNs2,
+			Type:      randomType,
+		},
 	})
 	if err != nil {
 		fmt.Println("error", err.Error())
@@ -189,10 +206,12 @@ func main() {
 
 	// List the keys for all org one more time, should be empty
 	fmt.Println("Step 10: list keys for all orgs, there should be none for orgId", orgId)
-	res10, err := c.Keys(ctx, &pb.SecretsRequest{
-		OrgId:     AllOrganizations,
-		Namespace: randomNs,
-		Type:      randomType,
+	res10, err := c.Keys(ctx, &pb.SecretsKeysRequest{
+		KeyDescriptor: &pb.Key{
+			Namespace: randomNs,
+			Type:      randomType,
+		},
+		AllOrganizations: true,
 	})
 	if err != nil {
 		fmt.Println("error", err.Error())
@@ -203,10 +222,12 @@ func main() {
 
 	// attempt to grab some random val, should get exists false
 	fmt.Println("Step 11: get a random key, should give response with exists=false")
-	res11, err := c.Get(ctx, &pb.SecretsRequest{
-		OrgId:     1,
-		Namespace: randomNs,
-		Type:      randomType,
+	res11, err := c.Get(ctx, &pb.SecretsGetRequest{
+		KeyDescriptor: &pb.Key{
+			OrgId:     1,
+			Namespace: randomNs,
+			Type:      randomType,
+		},
 	})
 	if err != nil {
 		fmt.Println("error", err.Error())

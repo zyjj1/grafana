@@ -6,23 +6,25 @@ import (
 
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/plugins/backendplugin/secretsmanagerplugin"
-	pb "github.com/grafana/grafana/pkg/plugins/backendplugin/secretsmanagerplugin"
+	smp "github.com/grafana/grafana/pkg/plugins/backendplugin/secretsmanagerplugin"
 	"github.com/grafana/grafana/pkg/services/secrets"
 )
 
 // secretsKVStorePlugin provides a key/value store backed by the Grafana plugin gRPC interface
 type secretsKVStorePlugin struct {
 	log            log.Logger
-	client         pb.RemoteSecretsManagerClient
+	client         smp.RemoteSecretsManagerClient
 	secretsService secrets.Service
 }
 
 // Get an item from the store
 func (kv *secretsKVStorePlugin) Get(ctx context.Context, orgId int64, namespace string, typ string) (string, bool, error) {
-	req := &secretsmanagerplugin.SecretsRequest{
-		OrgId:     orgId,
-		Namespace: namespace,
-		Type:      typ,
+	req := &smp.SecretsGetRequest{
+		KeyDescriptor: &smp.Key{
+			OrgId:     orgId,
+			Namespace: namespace,
+			Type:      typ,
+		},
 	}
 
 	res, err := kv.client.Get(ctx, req)
@@ -35,11 +37,13 @@ func (kv *secretsKVStorePlugin) Get(ctx context.Context, orgId int64, namespace 
 
 // Set an item in the store
 func (kv *secretsKVStorePlugin) Set(ctx context.Context, orgId int64, namespace string, typ string, value string) error {
-	req := &secretsmanagerplugin.SecretsRequest{
-		OrgId:     orgId,
-		Namespace: namespace,
-		Type:      typ,
-		Value:     value,
+	req := &smp.SecretsSetRequest{
+		KeyDescriptor: &smp.Key{
+			OrgId:     orgId,
+			Namespace: namespace,
+			Type:      typ,
+		},
+		Value: value,
 	}
 
 	res, err := kv.client.Set(ctx, req)
@@ -52,10 +56,12 @@ func (kv *secretsKVStorePlugin) Set(ctx context.Context, orgId int64, namespace 
 
 // Del deletes an item from the store.
 func (kv *secretsKVStorePlugin) Del(ctx context.Context, orgId int64, namespace string, typ string) error {
-	req := &secretsmanagerplugin.SecretsRequest{
-		OrgId:     orgId,
-		Namespace: namespace,
-		Type:      typ,
+	req := &smp.SecretsDelRequest{
+		KeyDescriptor: &smp.Key{
+			OrgId:     orgId,
+			Namespace: namespace,
+			Type:      typ,
+		},
 	}
 
 	res, err := kv.client.Del(ctx, req)
@@ -69,10 +75,13 @@ func (kv *secretsKVStorePlugin) Del(ctx context.Context, orgId int64, namespace 
 // Keys get all keys for a given namespace. To query for all
 // organizations the constant 'kvstore.AllOrganizations' can be passed as orgId.
 func (kv *secretsKVStorePlugin) Keys(ctx context.Context, orgId int64, namespace string, typ string) ([]Key, error) {
-	req := &secretsmanagerplugin.SecretsRequest{
-		OrgId:     orgId,
-		Namespace: namespace,
-		Type:      typ,
+	req := &smp.SecretsKeysRequest{
+		KeyDescriptor: &smp.Key{
+			OrgId:     orgId,
+			Namespace: namespace,
+			Type:      typ,
+		},
+		AllOrganizations: orgId == AllOrganizations,
 	}
 
 	res, err := kv.client.Keys(ctx, req)
@@ -85,10 +94,12 @@ func (kv *secretsKVStorePlugin) Keys(ctx context.Context, orgId int64, namespace
 
 // Rename an item in the store
 func (kv *secretsKVStorePlugin) Rename(ctx context.Context, orgId int64, namespace string, typ string, newNamespace string) error {
-	req := &secretsmanagerplugin.SecretsRequest{
-		OrgId:        orgId,
-		Namespace:    namespace,
-		Type:         typ,
+	req := &smp.SecretsRenameRequest{
+		KeyDescriptor: &smp.Key{
+			OrgId:     orgId,
+			Namespace: namespace,
+			Type:      typ,
+		},
 		NewNamespace: newNamespace,
 	}
 

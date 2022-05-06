@@ -48,34 +48,47 @@ func main() {
 	// Contact the server and print out its response.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	res, err := c.Get(ctx, &pb.SecretsRequest{
-		OrgId:     69,
-		Namespace: "random ns",
-		Type:      "random type",
+	res, err := c.Get(ctx, &pb.SecretsGetRequest{
+		KeyDescriptor: &pb.Key{
+			OrgId:     100,
+			Namespace: "random ns",
+			Type:      "random type",
+		},
 	})
 	fmt.Println("GET response", res)
-	res2, err := c.Set(ctx, &pb.SecretsRequest{
-		OrgId:     69,
-		Namespace: "random ns",
-		Type:      "random type",
+	res2, err := c.Set(ctx, &pb.SecretsSetRequest{
+		KeyDescriptor: &pb.Key{
+			OrgId:     100,
+			Namespace: "random ns",
+			Type:      "random type",
+		},
+		Value: "random value",
 	})
 	fmt.Println("SET response", res2)
-	res3, err := c.Del(ctx, &pb.SecretsRequest{
-		OrgId:     69,
-		Namespace: "random ns",
-		Type:      "random type",
+	res3, err := c.Del(ctx, &pb.SecretsDelRequest{
+		KeyDescriptor: &pb.Key{
+			OrgId:     100,
+			Namespace: "random ns",
+			Type:      "random type",
+		},
 	})
 	fmt.Println("DEL response", res3)
-	res4, err := c.Rename(ctx, &pb.SecretsRequest{
-		OrgId:     69,
-		Namespace: "random ns",
-		Type:      "random type",
+	res4, err := c.Rename(ctx, &pb.SecretsRenameRequest{
+		KeyDescriptor: &pb.Key{
+			OrgId:     100,
+			Namespace: "random ns",
+			Type:      "random type",
+		},
+		NewNamespace: "random new ns",
 	})
 	fmt.Println("RENAME response", res4)
-	res5, err := c.Keys(ctx, &pb.SecretsRequest{
-		OrgId:     69,
-		Namespace: "random ns",
-		Type:      "random type",
+	res5, err := c.Keys(ctx, &pb.SecretsKeysRequest{
+		KeyDescriptor: &pb.Key{
+			OrgId:     100,
+			Namespace: "random ns",
+			Type:      "random type",
+		},
+		AllOrganizations: false,
 	})
 	fmt.Println("KEYS response", res5)
 }

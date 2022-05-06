@@ -39,7 +39,7 @@ type server struct {
 	pb.UnimplementedRemoteSecretsManagerServer
 }
 
-func (s *server) Get(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsGetResponse, error) {
+func (s *server) Get(ctx context.Context, sr *pb.SecretsGetRequest) (*pb.SecretsGetResponse, error) {
 	fmt.Println("received secrets GET request", sr)
 	return &pb.SecretsGetResponse{
 		DecryptedValue: "random bs",
@@ -47,19 +47,19 @@ func (s *server) Get(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsGet
 		Error:          "",
 	}, nil
 }
-func (s *server) Set(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsErrorResponse, error) {
+func (s *server) Set(ctx context.Context, sr *pb.SecretsSetRequest) (*pb.SecretsErrorResponse, error) {
 	fmt.Println("received secrets SET request", sr)
 	return &pb.SecretsErrorResponse{
 		Error: "",
 	}, nil
 }
-func (s *server) Del(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsErrorResponse, error) {
+func (s *server) Del(ctx context.Context, sr *pb.SecretsDelRequest) (*pb.SecretsErrorResponse, error) {
 	fmt.Println("received secrets DEL request", sr)
 	return &pb.SecretsErrorResponse{
 		Error: "",
 	}, nil
 }
-func (s *server) Keys(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsKeysResponse, error) {
+func (s *server) Keys(ctx context.Context, sr *pb.SecretsKeysRequest) (*pb.SecretsKeysResponse, error) {
 	fmt.Println("received secrets KEYS request", sr)
 	return &pb.SecretsKeysResponse{
 		Error: "",
@@ -70,7 +70,7 @@ func (s *server) Keys(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsKe
 		}},
 	}, nil
 }
-func (s *server) Rename(ctx context.Context, sr *pb.SecretsRequest) (*pb.SecretsErrorResponse, error) {
+func (s *server) Rename(ctx context.Context, sr *pb.SecretsRenameRequest) (*pb.SecretsErrorResponse, error) {
 	fmt.Println("received secrets RENAME request", sr)
 	return &pb.SecretsErrorResponse{
 		Error: "",
