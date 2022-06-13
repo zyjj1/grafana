@@ -138,14 +138,10 @@ export function CloudWatchLogsQueryField(props: CloudWatchLogsQueryFieldProps) {
 
     return this.fetchLogGroupOptions(region, searchTerm)
       .then((matchingLogGroups) => {
-        this.setState((state) => ({
-          availableLogGroups: unionBy(state.availableLogGroups, matchingLogGroups, 'value'),
-        }));
+        setAvailableLogGroups(unionBy(availableLogGroups, matchingLogGroups, 'value'));
       })
       .finally(() => {
-        this.setState({
-          loadingLogGroups: false,
-        });
+        setLoadingLogGroups(false)
       });
   };
 
@@ -312,7 +308,7 @@ export function CloudWatchLogsQueryField(props: CloudWatchLogsQueryFieldProps) {
                 options={appendTemplateVariables(datasource, unionBy(availableLogGroups, selectedLogGroups, 'value'))}
                 value={selectedLogGroups}
                 onChange={(v) => {
-                  this.setSelectedLogGroups(v);
+                  setSelectedLogGroups(v);
                 }}
                 onCreateOption={(v) => {
                   this.setCustomLogGroups(v);
