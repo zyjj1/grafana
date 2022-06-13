@@ -1,7 +1,7 @@
 import { css } from '@emotion/css';
 import { debounce, intersectionBy, unionBy } from 'lodash';
 import { LanguageMap, languages as prismLanguages } from 'prismjs';
-import React, {ReactNode, useState} from 'react';
+import React, {ReactNode, useState, useEffect} from 'react';
 import { Editor, Node, Plugin } from 'slate';
 
 import { AbsoluteTimeRange, QueryEditorProps, SelectableValue } from '@grafana/data';
@@ -147,12 +147,11 @@ export function CloudWatchLogsQueryField(props: CloudWatchLogsQueryFieldProps) {
 
   onLogGroupSearchDebounced = debounce(this.onLogGroupSearch, 300);
 
-  componentDidMount = () => {
+
+  useEffect(() => {
     const { query, onChange } = this.props;
 
-    this.setState({
-      loadingLogGroups: true,
-    });
+    setLoadingLogGroups(true)
 
     query.region &&
     this.fetchLogGroupOptions(query.region).then((logGroups) => {
@@ -174,7 +173,7 @@ export function CloudWatchLogsQueryField(props: CloudWatchLogsQueryFieldProps) {
         };
       });
     });
-  };
+  })
 
   onChangeQuery = (value: string) => {
     // Send text change to parent
