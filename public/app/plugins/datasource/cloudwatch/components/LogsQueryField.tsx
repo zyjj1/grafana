@@ -1,7 +1,7 @@
 import { css } from '@emotion/css';
 import { debounce, intersectionBy, unionBy } from 'lodash';
 import { LanguageMap, languages as prismLanguages } from 'prismjs';
-import React, { ReactNode } from 'react';
+import React, {ReactNode, useState} from 'react';
 import { Editor, Node, Plugin } from 'slate';
 
 import { AbsoluteTimeRange, QueryEditorProps, SelectableValue } from '@grafana/data';
@@ -66,18 +66,15 @@ interface State {
     | undefined;
 }
 
-export const CloudWatchLogsQueryField = (props: CloudWatchLogsQueryFieldProps) => {
-  state: State = {
-    selectedLogGroups:
-      (this.props.query as CloudWatchLogsQuery).logGroupNames?.map((logGroup) => ({
-        value: logGroup,
-        label: logGroup,
-      })) ?? [],
-    availableLogGroups: [],
-    invalidLogGroups: false,
-    loadingLogGroups: false,
-    hint: undefined,
-  };
+export function CloudWatchLogsQueryField(props: CloudWatchLogsQueryFieldProps) {
+  const [selectedLogGroups, setSelectedLogGroups] = useState( props.query.logGroupNames?.map((logGroup) => ({
+    value: logGroup,
+    label: logGroup,
+  })) ?? []);
+  const [availableLogGroups, setAvailableLogGroups] = useState([]);
+  const [invalidLogGroups, setInvalidLogGroups] = useState(false);
+  const [loadingLogGroups, setLoadingLogGroups] = useState(false);
+  const [hint, setHint] = useState(undefined);
 
   plugins: Plugin[];
 
@@ -162,25 +159,25 @@ export const CloudWatchLogsQueryField = (props: CloudWatchLogsQueryFieldProps) =
     });
 
     query.region &&
-      this.fetchLogGroupOptions(query.region).then((logGroups) => {
-        this.setState((state) => {
-          const selectedLogGroups = state.selectedLogGroups;
-          if (onChange) {
-            const nextQuery = {
-              ...query,
-              logGroupNames: selectedLogGroups.map((group) => group.value!),
-            };
-
-            onChange(nextQuery);
-          }
-
-          return {
-            loadingLogGroups: false,
-            availableLogGroups: logGroups,
-            selectedLogGroups,
+    this.fetchLogGroupOptions(query.region).then((logGroups) => {
+      this.setState((state) => {
+        const selectedLogGroups = state.selectedLogGroups;
+        if (onChange) {
+          const nextQuery = {
+            ...query,
+            logGroupNames: selectedLogGroups.map((group) => group.value!),
           };
-        });
+
+          onChange(nextQuery);
+        }
+
+        return {
+          loadingLogGroups: false,
+          availableLogGroups: logGroups,
+          selectedLogGroups,
+        };
       });
+    });
   };
 
   onChangeQuery = (value: string) => {
