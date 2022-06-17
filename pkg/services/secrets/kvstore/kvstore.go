@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/registry"
 	"github.com/grafana/grafana/pkg/services/secrets"
 	"github.com/grafana/grafana/pkg/services/sqlstore"
 )
@@ -17,15 +18,10 @@ func ProvideService(sqlStore sqlstore.Store, secretsService secrets.Service, rem
 	logger := log.New("secrets.kvstore")
 	if remoteCheck.ShouldUseRemoteSecretsPlugin() {
 		logger.Debug("secrets kvstore is using a remote plugin for secrets management")
-		secretsPlugin, err := remoteCheck.GetPlugin()
-		if err != nil {
-			logger.Error("plugin client was nil, falling back to SQL implementation")
-		} else {
-			return &secretsKVStorePlugin{
-				secretsPlugin:  secretsPlugin,
-				secretsService: secretsService,
-				log:            logger,
-			}
+		return &secretsKVStorePlugin{
+			secretsService:    secretsService,
+			remotePluginCheck: remoteCheck,
+			log:               logger,
 		}
 	}
 	logger.Debug("secrets kvstore is using the default (SQL) implementation for secrets management")
@@ -46,6 +42,7 @@ type SecretsKVStore interface {
 	Del(ctx context.Context, orgId int64, namespace string, typ string) error
 	Keys(ctx context.Context, orgId int64, namespace string, typ string) ([]Key, error)
 	Rename(ctx context.Context, orgId int64, namespace string, typ string, newNamespace string) error
+	registry.BackgroundService
 }
 
 // WithType returns a kvstore wrapper with fixed orgId and type.

@@ -2,6 +2,7 @@ package kvstore
 
 import (
 	"context"
+	"errors"
 
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/models"
@@ -11,9 +12,28 @@ import (
 
 // secretsKVStorePlugin provides a key/value store backed by the Grafana plugin gRPC interface
 type secretsKVStorePlugin struct {
-	log            log.Logger
-	secretsPlugin  smp.SecretsManagerPlugin
-	secretsService secrets.Service
+	log               log.Logger
+	remotePluginCheck UseRemoteSecretsPluginCheck
+	secretsPlugin     smp.SecretsManagerPlugin
+	secretsService    secrets.Service
+}
+
+func (kv *secretsKVStorePlugin) Run(ctx context.Context) error {
+	if err := kv.remotePluginCheck.StartPlugin(ctx); err != nil {
+		kv.log.Error("failed to start remote secret management plugin", "msg", err.Error())
+		return err
+	}
+	if plugin, err := kv.remotePluginCheck.GetPlugin(); err != nil {
+		kv.log.Error("failed to start remote secret management plugin", "msg", err.Error())
+		return err
+	} else if plugin == nil {
+		return errors.New("remote secret management plugin was nil")
+	} else {
+		kv.secretsPlugin = plugin
+	}
+	kv.log.Debug("started remote secrets plugin")
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 // Get an item from the store
