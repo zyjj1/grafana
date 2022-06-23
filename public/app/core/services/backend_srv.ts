@@ -390,23 +390,23 @@ export class BackendSrv implements BackendService {
     return this.inspectorStream;
   }
 
-  async get<T = any>(url: string, params?: any, requestId?: string, options?: BackendSrvRequest): Promise<T> {
+  async get<T = any>(url: string, params?: any, requestId?: string, options?: Partial<BackendSrvRequest>): Promise<T> {
     return await this.request({ ...options, method: 'GET', url, params, requestId });
   }
 
-  async delete(url: string, data?: any, options?: BackendSrvRequest) {
+  async delete(url: string, data?: any, options?: Partial<BackendSrvRequest>) {
     return await this.request({ ...options, method: 'DELETE', url, data });
   }
 
-  async post(url: string, data?: any, options?: BackendSrvRequest) {
+  async post(url: string, data?: any, options?: Partial<BackendSrvRequest>) {
     return await this.request({ ...options, method: 'POST', url, data });
   }
 
-  async patch(url: string, data: any, options?: BackendSrvRequest) {
+  async patch(url: string, data: any, options?: Partial<BackendSrvRequest>) {
     return await this.request({ ...options, method: 'PATCH', url, data });
   }
 
-  async put(url: string, data: any, options?: BackendSrvRequest) {
+  async put(url: string, data: any, options?: Partial<BackendSrvRequest>) {
     return await this.request({ ...options, method: 'PUT', url, data });
   }
 

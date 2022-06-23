@@ -143,11 +143,11 @@ export function isFetchError(e: unknown): e is FetchError {
  * @public
  */
 export interface BackendSrv {
-  get(url: string, params?: any, requestId?: string, options?: BackendSrvRequest): Promise<any>;
-  delete(url: string, data?: any, options?: BackendSrvRequest): Promise<any>;
-  post(url: string, data?: any, options?: BackendSrvRequest): Promise<any>;
-  patch(url: string, data?: any, options?: BackendSrvRequest): Promise<any>;
-  put(url: string, data?: any, options?: BackendSrvRequest): Promise<any>;
+  get(url: string, params?: any, requestId?: string, options?: Partial<BackendSrvRequest>): Promise<any>;
+  delete(url: string, data?: any, options?: Partial<BackendSrvRequest>): Promise<any>;
+  post(url: string, data?: any, options?: Partial<BackendSrvRequest>): Promise<any>;
+  patch(url: string, data?: any, options?: Partial<BackendSrvRequest>): Promise<any>;
+  put(url: string, data?: any, options?: Partial<BackendSrvRequest>): Promise<any>;
 
   /**
    * @deprecated Use the fetch function instead. If you prefer to work with a promise
