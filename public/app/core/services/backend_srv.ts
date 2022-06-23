@@ -391,23 +391,35 @@ export class BackendSrv implements BackendService {
   }
 
   async get<T = any>(url: string, params?: any, requestId?: string, options?: Partial<BackendSrvRequest>): Promise<T> {
-    return await this.request({ ...options, method: 'GET', url, params, requestId });
+    return await lastValueFrom(
+      this.fetch<T>({ ...options, method: 'GET', url, params, requestId }).pipe(
+        map((response: FetchResponse<T>) => response.data)
+      )
+    );
   }
 
   async delete(url: string, data?: any, options?: Partial<BackendSrvRequest>) {
-    return await this.request({ ...options, method: 'DELETE', url, data });
+    return await lastValueFrom(
+      this.fetch({ ...options, method: 'DELETE', url, data }).pipe(map((response: FetchResponse) => response.data))
+    );
   }
 
   async post(url: string, data?: any, options?: Partial<BackendSrvRequest>) {
-    return await this.request({ ...options, method: 'POST', url, data });
+    return await lastValueFrom(
+      this.fetch({ ...options, method: 'POST', url, data }).pipe(map((response: FetchResponse) => response.data))
+    );
   }
 
   async patch(url: string, data: any, options?: Partial<BackendSrvRequest>) {
-    return await this.request({ ...options, method: 'PATCH', url, data });
+    return await lastValueFrom(
+      this.fetch({ ...options, method: 'PATCH', url, data }).pipe(map((response: FetchResponse) => response.data))
+    );
   }
 
   async put(url: string, data: any, options?: Partial<BackendSrvRequest>) {
-    return await this.request({ ...options, method: 'PUT', url, data });
+    return await lastValueFrom(
+      this.fetch({ ...options, method: 'PUT', url, data }).pipe(map((response: FetchResponse) => response.data))
+    );
   }
 
   withNoBackendCache(callback: any) {
@@ -418,7 +430,11 @@ export class BackendSrv implements BackendService {
   }
 
   loginPing() {
-    return this.request({ url: '/api/login/ping', method: 'GET', retry: 1 });
+    return lastValueFrom(
+      this.fetch({ method: 'GET', url: '/api/login/ping', retry: 1 }).pipe(
+        map((response: FetchResponse) => response.data)
+      )
+    );
   }
 
   search(query: any): Promise<DashboardSearchHit[]> {
