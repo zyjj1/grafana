@@ -390,24 +390,24 @@ export class BackendSrv implements BackendService {
     return this.inspectorStream;
   }
 
-  async get<T = any>(url: string, params?: any, requestId?: string): Promise<T> {
-    return await this.request({ method: 'GET', url, params, requestId });
+  async get<T = any>(url: string, params?: any, requestId?: string, options?: BackendSrvRequest): Promise<T> {
+    return await this.request({ ...options, method: 'GET', url, params, requestId });
   }
 
-  async delete(url: string, data?: any) {
-    return await this.request({ method: 'DELETE', url, data });
+  async delete(url: string, data?: any, options?: BackendSrvRequest) {
+    return await this.request({ ...options, method: 'DELETE', url, data });
   }
 
-  async post(url: string, data?: any) {
-    return await this.request({ method: 'POST', url, data });
+  async post(url: string, data?: any, options?: BackendSrvRequest) {
+    return await this.request({ ...options, method: 'POST', url, data });
   }
 
-  async patch(url: string, data: any) {
-    return await this.request({ method: 'PATCH', url, data });
+  async patch(url: string, data: any, options?: BackendSrvRequest) {
+    return await this.request({ ...options, method: 'PATCH', url, data });
   }
 
-  async put(url: string, data: any) {
-    return await this.request({ method: 'PUT', url, data });
+  async put(url: string, data: any, options?: BackendSrvRequest) {
+    return await this.request({ ...options, method: 'PUT', url, data });
   }
 
   withNoBackendCache(callback: any) {
