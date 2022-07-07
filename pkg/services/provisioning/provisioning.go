@@ -18,6 +18,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/ngalert/store"
 	"github.com/grafana/grafana/pkg/services/notifications"
 	"github.com/grafana/grafana/pkg/services/pluginsettings"
+	"github.com/grafana/grafana/pkg/services/provisioning/alerting/contactpoints"
 	"github.com/grafana/grafana/pkg/services/provisioning/alerting/rules"
 	"github.com/grafana/grafana/pkg/services/provisioning/dashboards"
 	"github.com/grafana/grafana/pkg/services/provisioning/datasources"
@@ -26,6 +27,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/provisioning/utils"
 	"github.com/grafana/grafana/pkg/services/quota"
 	"github.com/grafana/grafana/pkg/services/searchV2"
+	"github.com/grafana/grafana/pkg/services/secrets"
 	"github.com/grafana/grafana/pkg/services/sqlstore"
 	"github.com/grafana/grafana/pkg/setting"
 )
@@ -45,6 +47,7 @@ func ProvideService(
 	pluginSettings pluginsettings.Service,
 	searchService searchV2.SearchService,
 	quotaService *quota.QuotaService,
+	secrectService secrets.Service,
 ) (*ProvisioningServiceImpl, error) {
 	s := &ProvisioningServiceImpl{
 		Cfg:                          cfg,
@@ -64,6 +67,7 @@ func ProvideService(
 		pluginsSettings:              pluginSettings,
 		searchService:                searchService,
 		quotaService:                 quotaService,
+		secretService:                secrectService,
 		log:                          log.New("provisioning"),
 	}
 	return s, nil
@@ -77,6 +81,7 @@ type ProvisioningService interface {
 	ProvisionNotifications(ctx context.Context) error
 	ProvisionDashboards(ctx context.Context) error
 	ProvisionAlertRules(ctx context.Context) error
+	ProvisionContactPoints(ctx context.Context) error
 	GetDashboardProvisionerResolvedPath(name string) string
 	GetAllowUIUpdatesFromConfig(name string) bool
 }
@@ -91,6 +96,7 @@ func NewProvisioningServiceImpl() *ProvisioningServiceImpl {
 		provisionDatasources:    datasources.Provision,
 		provisionPlugins:        plugins.Provision,
 		provisionRules:          rules.Provision,
+		provisionContactPoints:  contactpoints.Provision,
 	}
 }
 
@@ -125,6 +131,7 @@ type ProvisioningServiceImpl struct {
 	provisionDatasources         func(context.Context, string, datasources.Store, utils.OrgStore) error
 	provisionPlugins             func(context.Context, string, plugins.Store, plugifaces.Store, pluginsettings.Service) error
 	provisionRules               func(context.Context, string, dashboardservice.DashboardService, dashboardservice.DashboardProvisioningService, provisioning.AlertRuleService) error
+	provisionContactPoints       func(context.Context, string, *provisioning.ContactPointService) error
 	mutex                        sync.Mutex
 	dashboardProvisioningService dashboardservice.DashboardProvisioningService
 	dashboardService             dashboardservice.DashboardService
@@ -133,6 +140,7 @@ type ProvisioningServiceImpl struct {
 	pluginsSettings              pluginsettings.Service
 	searchService                searchV2.SearchService
 	quotaService                 quota.Service
+	secretService                secrets.Service
 }
 
 func (ps *ProvisioningServiceImpl) RunInitProvisioners(ctx context.Context) error {
@@ -152,6 +160,11 @@ func (ps *ProvisioningServiceImpl) RunInitProvisioners(ctx context.Context) erro
 	}
 
 	err = ps.ProvisionAlertRules(ctx)
+	if err != nil {
+		return err
+	}
+
+	err = ps.ProvisionContactPoints(ctx)
 	if err != nil {
 		return err
 	}
@@ -265,6 +278,10 @@ func (ps *ProvisioningServiceImpl) ProvisionAlertRules(ctx context.Context) erro
 		ps.log)
 	return rules.Provision(ctx, alertRulesPath, ps.dashboardService,
 		ps.dashboardProvisioningService, *ruleService)
+}
+
+func (ps *ProvisioningServiceImpl) ProvisionContactPoints(ctx context.Context) error {
+	return nil
 }
 
 func (ps *ProvisioningServiceImpl) GetDashboardProvisionerResolvedPath(name string) string {
