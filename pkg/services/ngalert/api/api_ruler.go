@@ -15,7 +15,6 @@ import (
 	"github.com/grafana/grafana/pkg/services/ngalert/store"
 	"github.com/grafana/grafana/pkg/services/quota"
 	"github.com/grafana/grafana/pkg/setting"
-	"github.com/grafana/grafana/pkg/util/cmputil"
 
 	"github.com/prometheus/common/model"
 
@@ -326,16 +325,16 @@ func (srv RulerSrv) RoutePostNameRulesConfig(c *models.ReqContext, ruleGroupConf
 // updateAlertRulesInGroup calculates changes (rules to add,update,delete), verifies that the user is authorized to do the calculated changes and updates database.
 // All operations are performed in a single transaction
 func (srv RulerSrv) updateAlertRulesInGroup(c *models.ReqContext, groupKey ngmodels.AlertRuleGroupKey, rules []*ngmodels.AlertRule) response.Response {
-	var finalChanges *changes
+	var finalChanges *store.GroupDiff
 	hasAccess := accesscontrol.HasAccess(srv.ac, c)
 	err := srv.xactManager.InTransaction(c.Req.Context(), func(tranCtx context.Context) error {
 		logger := srv.log.New("namespace_uid", groupKey.NamespaceUID, "group", groupKey.RuleGroup, "org_id", groupKey.OrgID, "user_id", c.UserId)
-		groupChanges, err := calculateChanges(tranCtx, srv.store, groupKey, rules)
+		groupChanges, err := store.CalculateChanges(tranCtx, srv.store, groupKey, rules)
 		if err != nil {
 			return err
 		}
 
-		if groupChanges.isEmpty() {
+		if groupChanges.IsEmpty() {
 			finalChanges = groupChanges
 			logger.Info("no changes detected in the request. Do nothing")
 			return nil
@@ -436,7 +435,7 @@ func (srv RulerSrv) updateAlertRulesInGroup(c *models.ReqContext, groupKey ngmod
 		})
 	}
 
-	if finalChanges.isEmpty() {
+	if finalChanges.IsEmpty() {
 		return response.JSON(http.StatusAccepted, util.DynMap{"message": "no changes detected in the rule group"})
 	}
 
@@ -503,29 +502,9 @@ func toNamespaceErrorResponse(err error) response.Response {
 	return apierrors.ToFolderErrorResponse(err)
 }
 
-type ruleUpdate struct {
-	Existing *ngmodels.AlertRule
-	New      *ngmodels.AlertRule
-	Diff     cmputil.DiffReport
-}
-
-type changes struct {
-	GroupKey ngmodels.AlertRuleGroupKey
-	// AffectedGroups contains all rules of all groups that are affected by these changes.
-	// For example, during moving a rule from one group to another this map will contain all rules from two groups
-	AffectedGroups map[ngmodels.AlertRuleGroupKey]ngmodels.RulesGroup
-	New            []*ngmodels.AlertRule
-	Update         []ruleUpdate
-	Delete         []*ngmodels.AlertRule
-}
-
-func (c *changes) isEmpty() bool {
-	return len(c.Update)+len(c.New)+len(c.Delete) == 0
-}
-
 // verifyProvisionedRulesNotAffected check that neither of provisioned alerts are affected by changes.
 // Returns errProvisionedResource if there is at least one rule in groups affected by changes that was provisioned.
-func verifyProvisionedRulesNotAffected(ctx context.Context, provenanceStore provisioning.ProvisioningStore, orgID int64, ch *changes) error {
+func verifyProvisionedRulesNotAffected(ctx context.Context, provenanceStore provisioning.ProvisioningStore, orgID int64, ch *store.GroupDiff) error {
 	provenances, err := provenanceStore.GetProvenances(ctx, orgID, (&ngmodels.AlertRule{}).ResourceType())
 	if err != nil {
 		return err
@@ -549,94 +528,10 @@ func verifyProvisionedRulesNotAffected(ctx context.Context, provenanceStore prov
 	return fmt.Errorf("%w: alert rule group [%s]", errProvisionedResource, errorMsg.String())
 }
 
-// calculateChanges calculates the difference between rules in the group in the database and the submitted rules. If a submitted rule has UID it tries to find it in the database (in other groups).
-// returns a list of rules that need to be added, updated and deleted. Deleted considered rules in the database that belong to the group but do not exist in the list of submitted rules.
-func calculateChanges(ctx context.Context, ruleStore store.RuleStore, groupKey ngmodels.AlertRuleGroupKey, submittedRules []*ngmodels.AlertRule) (*changes, error) {
-	affectedGroups := make(map[ngmodels.AlertRuleGroupKey]ngmodels.RulesGroup)
-	q := &ngmodels.ListAlertRulesQuery{
-		OrgID:         groupKey.OrgID,
-		NamespaceUIDs: []string{groupKey.NamespaceUID},
-		RuleGroup:     groupKey.RuleGroup,
-	}
-	if err := ruleStore.ListAlertRules(ctx, q); err != nil {
-		return nil, fmt.Errorf("failed to query database for rules in the group %s: %w", groupKey, err)
-	}
-	existingGroupRules := q.Result
-	if len(existingGroupRules) > 0 {
-		affectedGroups[groupKey] = existingGroupRules
-	}
-
-	existingGroupRulesUIDs := make(map[string]*ngmodels.AlertRule, len(existingGroupRules))
-	for _, r := range existingGroupRules {
-		existingGroupRulesUIDs[r.UID] = r
-	}
-
-	var toAdd, toDelete []*ngmodels.AlertRule
-	var toUpdate []ruleUpdate
-	loadedRulesByUID := map[string]*ngmodels.AlertRule{} // auxiliary cache to avoid unnecessary queries if there are multiple moves from the same group
-	for _, r := range submittedRules {
-		var existing *ngmodels.AlertRule = nil
-		if r.UID != "" {
-			if existingGroupRule, ok := existingGroupRulesUIDs[r.UID]; ok {
-				existing = existingGroupRule
-				// remove the rule from existingGroupRulesUIDs
-				delete(existingGroupRulesUIDs, r.UID)
-			} else if existing, ok = loadedRulesByUID[r.UID]; !ok { // check the "cache" and if there is no hit, query the database
-				// Rule can be from other group or namespace
-				q := &ngmodels.GetAlertRulesGroupByRuleUIDQuery{OrgID: groupKey.OrgID, UID: r.UID}
-				if err := ruleStore.GetAlertRulesGroupByRuleUID(ctx, q); err != nil {
-					return nil, fmt.Errorf("failed to query database for a group of alert rules: %w", err)
-				}
-				for _, rule := range q.Result {
-					if rule.UID == r.UID {
-						existing = rule
-					}
-					loadedRulesByUID[rule.UID] = rule
-				}
-				if existing == nil {
-					return nil, fmt.Errorf("failed to update rule with UID %s because %w", r.UID, ngmodels.ErrAlertRuleNotFound)
-				}
-				affectedGroups[existing.GetGroupKey()] = q.Result
-			}
-		}
-
-		if existing == nil {
-			toAdd = append(toAdd, r)
-			continue
-		}
-
-		ngmodels.PatchPartialAlertRule(existing, r)
-
-		diff := existing.Diff(r, alertRuleFieldsToIgnoreInDiff...)
-		if len(diff) == 0 {
-			continue
-		}
-
-		toUpdate = append(toUpdate, ruleUpdate{
-			Existing: existing,
-			New:      r,
-			Diff:     diff,
-		})
-		continue
-	}
-
-	for _, rule := range existingGroupRulesUIDs {
-		toDelete = append(toDelete, rule)
-	}
-
-	return &changes{
-		GroupKey:       groupKey,
-		AffectedGroups: affectedGroups,
-		New:            toAdd,
-		Delete:         toDelete,
-		Update:         toUpdate,
-	}, nil
-}
-
 // calculateAutomaticChanges scans all affected groups and creates either a noop update that will increment the version of each rule as well as re-index other groups.
 // this is needed to make sure that there are no any concurrent changes made to all affected groups.
 // Returns a copy of changes enriched with either noop or group index changes for all rules in
-func calculateAutomaticChanges(ch *changes) *changes {
+func calculateAutomaticChanges(ch *store.GroupDiff) *store.GroupDiff {
 	updatingRules := make(map[ngmodels.AlertRuleKey]struct{}, len(ch.Delete)+len(ch.Update))
 	for _, update := range ch.Update {
 		updatingRules[update.Existing.GetKey()] = struct{}{}
@@ -644,7 +539,7 @@ func calculateAutomaticChanges(ch *changes) *changes {
 	for _, del := range ch.Delete {
 		updatingRules[del.GetKey()] = struct{}{}
 	}
-	var toUpdate []ruleUpdate
+	var toUpdate []store.RuleDelta
 	for groupKey, rules := range ch.AffectedGroups {
 		if groupKey != ch.GroupKey {
 			rules.SortByGroupIndex()
@@ -654,7 +549,7 @@ func calculateAutomaticChanges(ch *changes) *changes {
 			if _, ok := updatingRules[rule.GetKey()]; ok { // exclude rules that are going to be either updated or deleted
 				continue
 			}
-			upd := ruleUpdate{
+			upd := store.RuleDelta{
 				Existing: rule,
 				New:      rule,
 			}
@@ -662,14 +557,14 @@ func calculateAutomaticChanges(ch *changes) *changes {
 				if rule.RuleGroupIndex != idx {
 					upd.New = ngmodels.CopyRule(rule)
 					upd.New.RuleGroupIndex = idx
-					upd.Diff = rule.Diff(upd.New, alertRuleFieldsToIgnoreInDiff...)
+					upd.Diff = rule.Diff(upd.New, store.AlertRuleFieldsToIgnoreInDiff[:]...)
 				}
 				idx++
 			}
 			toUpdate = append(toUpdate, upd)
 		}
 	}
-	return &changes{
+	return &store.GroupDiff{
 		GroupKey:       ch.GroupKey,
 		AffectedGroups: ch.AffectedGroups,
 		New:            ch.New,
@@ -677,6 +572,3 @@ func calculateAutomaticChanges(ch *changes) *changes {
 		Delete:         ch.Delete,
 	}
 }
-
-// alertRuleFieldsToIgnoreInDiff contains fields that the AlertRule.Diff should ignore
-var alertRuleFieldsToIgnoreInDiff = []string{"ID", "Version", "Updated"}
