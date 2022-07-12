@@ -598,7 +598,7 @@ func TestVerifyProvisionedRulesNotAffected(t *testing.T) {
 			affectedGroups[g] = rules
 		}
 	}
-	ch := &store.GroupDiff{
+	ch := &store.GroupDelta{
 		GroupKey:       group,
 		AffectedGroups: affectedGroups,
 	}
@@ -666,7 +666,7 @@ func TestCalculateAutomaticChanges(t *testing.T) {
 		}
 
 		// simulate adding new rules, updating a few existing and delete some from the same rule
-		ch := &store.GroupDiff{
+		ch := &store.GroupDelta{
 			GroupKey: group,
 			AffectedGroups: map[models.AlertRuleGroupKey]models.RulesGroup{
 				group: copies,
@@ -721,7 +721,7 @@ func TestCalculateAutomaticChanges(t *testing.T) {
 		})
 
 		// simulate moving a rule from one group to another.
-		ch := &store.GroupDiff{
+		ch := &store.GroupDelta{
 			GroupKey: group,
 			AffectedGroups: map[models.AlertRuleGroupKey]models.RulesGroup{
 				group:  rules,

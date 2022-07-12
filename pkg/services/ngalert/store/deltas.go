@@ -18,7 +18,7 @@ type RuleDelta struct {
 	Diff     cmputil.DiffReport
 }
 
-type GroupDiff struct {
+type GroupDelta struct {
 	GroupKey ngmodels.AlertRuleGroupKey
 	// AffectedGroups contains all rules of all groups that are affected by these changes.
 	// For example, during moving a rule from one group to another this map will contain all rules from two groups
@@ -28,13 +28,13 @@ type GroupDiff struct {
 	Delete         []*ngmodels.AlertRule
 }
 
-func (c *GroupDiff) IsEmpty() bool {
+func (c *GroupDelta) IsEmpty() bool {
 	return len(c.Update)+len(c.New)+len(c.Delete) == 0
 }
 
 // CalculateChanges calculates the difference between rules in the group in the database and the submitted rules. If a submitted rule has UID it tries to find it in the database (in other groups).
 // returns a list of rules that need to be added, updated and deleted. Deleted considered rules in the database that belong to the group but do not exist in the list of submitted rules.
-func CalculateChanges(ctx context.Context, ruleStore RuleStore, groupKey models.AlertRuleGroupKey, submittedRules []*models.AlertRule) (*GroupDiff, error) {
+func CalculateChanges(ctx context.Context, ruleStore RuleStore, groupKey models.AlertRuleGroupKey, submittedRules []*models.AlertRule) (*GroupDelta, error) {
 	affectedGroups := make(map[models.AlertRuleGroupKey]models.RulesGroup)
 	q := &models.ListAlertRulesQuery{
 		OrgID:         groupKey.OrgID,
@@ -107,7 +107,7 @@ func CalculateChanges(ctx context.Context, ruleStore RuleStore, groupKey models.
 		toDelete = append(toDelete, rule)
 	}
 
-	return &GroupDiff{
+	return &GroupDelta{
 		GroupKey:       groupKey,
 		AffectedGroups: affectedGroups,
 		New:            toAdd,

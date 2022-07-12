@@ -138,20 +138,20 @@ func TestAuthorizeRuleChanges(t *testing.T) {
 
 	testCases := []struct {
 		name        string
-		changes     func() *store.GroupDiff
-		permissions func(c *store.GroupDiff) map[string][]string
+		changes     func() *store.GroupDelta
+		permissions func(c *store.GroupDelta) map[string][]string
 	}{
 		{
 			name: "if there are rules to add it should check create action and query for datasource",
-			changes: func() *store.GroupDiff {
-				return &store.GroupDiff{
+			changes: func() *store.GroupDelta {
+				return &store.GroupDelta{
 					GroupKey: groupKey,
 					New:      models.GenerateAlertRules(rand.Intn(4)+1, models.AlertRuleGen(withGroupKey(groupKey))),
 					Update:   nil,
 					Delete:   nil,
 				}
 			},
-			permissions: func(c *store.GroupDiff) map[string][]string {
+			permissions: func(c *store.GroupDelta) map[string][]string {
 				var scopes []string
 				for _, rule := range c.New {
 					for _, query := range rule.Data {
@@ -168,10 +168,10 @@ func TestAuthorizeRuleChanges(t *testing.T) {
 		},
 		{
 			name: "if there are rules to delete it should check delete action and query for datasource",
-			changes: func() *store.GroupDiff {
+			changes: func() *store.GroupDelta {
 				rules := models.GenerateAlertRules(rand.Intn(4)+1, models.AlertRuleGen(withGroupKey(groupKey)))
 				rules2 := models.GenerateAlertRules(rand.Intn(4)+1, models.AlertRuleGen(withGroupKey(groupKey)))
-				return &store.GroupDiff{
+				return &store.GroupDelta{
 					GroupKey: groupKey,
 					AffectedGroups: map[models.AlertRuleGroupKey]models.RulesGroup{
 						groupKey: append(rules, rules2...),
@@ -181,7 +181,7 @@ func TestAuthorizeRuleChanges(t *testing.T) {
 					Delete: rules2,
 				}
 			},
-			permissions: func(c *store.GroupDiff) map[string][]string {
+			permissions: func(c *store.GroupDelta) map[string][]string {
 				return map[string][]string{
 					ac.ActionAlertingRuleDelete: {
 						namespaceIdScope,
@@ -192,7 +192,7 @@ func TestAuthorizeRuleChanges(t *testing.T) {
 		},
 		{
 			name: "if there are rules to update within the same namespace it should check update action and access to datasource",
-			changes: func() *store.GroupDiff {
+			changes: func() *store.GroupDelta {
 				rules1 := models.GenerateAlertRules(rand.Intn(4)+1, models.AlertRuleGen(withGroupKey(groupKey)))
 				rules := models.GenerateAlertRules(rand.Intn(4)+1, models.AlertRuleGen(withGroupKey(groupKey)))
 				updates := make([]store.RuleDelta, 0, len(rules))
@@ -207,7 +207,7 @@ func TestAuthorizeRuleChanges(t *testing.T) {
 					})
 				}
 
-				return &store.GroupDiff{
+				return &store.GroupDelta{
 					GroupKey: groupKey,
 					AffectedGroups: map[models.AlertRuleGroupKey]models.RulesGroup{
 						groupKey: append(rules, rules1...),
@@ -217,7 +217,7 @@ func TestAuthorizeRuleChanges(t *testing.T) {
 					Delete: nil,
 				}
 			},
-			permissions: func(c *store.GroupDiff) map[string][]string {
+			permissions: func(c *store.GroupDelta) map[string][]string {
 				scopes := getDatasourceScopesForRules(append(c.AffectedGroups[c.GroupKey], mapUpdates(c.Update, func(update store.RuleDelta) *models.AlertRule {
 					return update.New
 				})...))
@@ -231,7 +231,7 @@ func TestAuthorizeRuleChanges(t *testing.T) {
 		},
 		{
 			name: "if there are rules that are moved between namespaces it should check delete+add action and access to group where rules come from",
-			changes: func() *store.GroupDiff {
+			changes: func() *store.GroupDelta {
 				rules1 := models.GenerateAlertRules(rand.Intn(4)+1, models.AlertRuleGen(withGroupKey(groupKey)))
 				rules := models.GenerateAlertRules(rand.Intn(4)+1, models.AlertRuleGen(withGroupKey(groupKey)))
 
@@ -251,7 +251,7 @@ func TestAuthorizeRuleChanges(t *testing.T) {
 					})
 				}
 
-				return &store.GroupDiff{
+				return &store.GroupDelta{
 					GroupKey: targetGroupKey,
 					AffectedGroups: map[models.AlertRuleGroupKey]models.RulesGroup{
 						groupKey: append(rules, rules1...),
@@ -261,7 +261,7 @@ func TestAuthorizeRuleChanges(t *testing.T) {
 					Delete: nil,
 				}
 			},
-			permissions: func(c *store.GroupDiff) map[string][]string {
+			permissions: func(c *store.GroupDelta) map[string][]string {
 				dsScopes := getDatasourceScopesForRules(
 					append(append(append(c.AffectedGroups[c.GroupKey],
 						mapUpdates(c.Update, func(update store.RuleDelta) *models.AlertRule {
@@ -288,7 +288,7 @@ func TestAuthorizeRuleChanges(t *testing.T) {
 		},
 		{
 			name: "if there are rules that are moved between groups in the same namespace it should check update action and access to all groups (source+target)",
-			changes: func() *store.GroupDiff {
+			changes: func() *store.GroupDelta {
 				targetGroupKey := models.AlertRuleGroupKey{
 					OrgID:        groupKey.OrgID,
 					NamespaceUID: groupKey.NamespaceUID,
@@ -316,7 +316,7 @@ func TestAuthorizeRuleChanges(t *testing.T) {
 					})
 				}
 
-				return &store.GroupDiff{
+				return &store.GroupDelta{
 					GroupKey: targetGroupKey,
 					AffectedGroups: map[models.AlertRuleGroupKey]models.RulesGroup{
 						groupKey:       sourceGroup,
@@ -327,7 +327,7 @@ func TestAuthorizeRuleChanges(t *testing.T) {
 					Delete: nil,
 				}
 			},
-			permissions: func(c *store.GroupDiff) map[string][]string {
+			permissions: func(c *store.GroupDelta) map[string][]string {
 				scopes := make(map[string]struct{})
 				for _, update := range c.Update {
 					for _, query := range update.New.Data {

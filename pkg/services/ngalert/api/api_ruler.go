@@ -325,7 +325,7 @@ func (srv RulerSrv) RoutePostNameRulesConfig(c *models.ReqContext, ruleGroupConf
 // updateAlertRulesInGroup calculates changes (rules to add,update,delete), verifies that the user is authorized to do the calculated changes and updates database.
 // All operations are performed in a single transaction
 func (srv RulerSrv) updateAlertRulesInGroup(c *models.ReqContext, groupKey ngmodels.AlertRuleGroupKey, rules []*ngmodels.AlertRule) response.Response {
-	var finalChanges *store.GroupDiff
+	var finalChanges *store.GroupDelta
 	hasAccess := accesscontrol.HasAccess(srv.ac, c)
 	err := srv.xactManager.InTransaction(c.Req.Context(), func(tranCtx context.Context) error {
 		logger := srv.log.New("namespace_uid", groupKey.NamespaceUID, "group", groupKey.RuleGroup, "org_id", groupKey.OrgID, "user_id", c.UserId)
@@ -504,7 +504,7 @@ func toNamespaceErrorResponse(err error) response.Response {
 
 // verifyProvisionedRulesNotAffected check that neither of provisioned alerts are affected by changes.
 // Returns errProvisionedResource if there is at least one rule in groups affected by changes that was provisioned.
-func verifyProvisionedRulesNotAffected(ctx context.Context, provenanceStore provisioning.ProvisioningStore, orgID int64, ch *store.GroupDiff) error {
+func verifyProvisionedRulesNotAffected(ctx context.Context, provenanceStore provisioning.ProvisioningStore, orgID int64, ch *store.GroupDelta) error {
 	provenances, err := provenanceStore.GetProvenances(ctx, orgID, (&ngmodels.AlertRule{}).ResourceType())
 	if err != nil {
 		return err
@@ -531,7 +531,7 @@ func verifyProvisionedRulesNotAffected(ctx context.Context, provenanceStore prov
 // calculateAutomaticChanges scans all affected groups and creates either a noop update that will increment the version of each rule as well as re-index other groups.
 // this is needed to make sure that there are no any concurrent changes made to all affected groups.
 // Returns a copy of changes enriched with either noop or group index changes for all rules in
-func calculateAutomaticChanges(ch *store.GroupDiff) *store.GroupDiff {
+func calculateAutomaticChanges(ch *store.GroupDelta) *store.GroupDelta {
 	updatingRules := make(map[ngmodels.AlertRuleKey]struct{}, len(ch.Delete)+len(ch.Update))
 	for _, update := range ch.Update {
 		updatingRules[update.Existing.GetKey()] = struct{}{}
@@ -564,7 +564,7 @@ func calculateAutomaticChanges(ch *store.GroupDiff) *store.GroupDiff {
 			toUpdate = append(toUpdate, upd)
 		}
 	}
-	return &store.GroupDiff{
+	return &store.GroupDelta{
 		GroupKey:       ch.GroupKey,
 		AffectedGroups: ch.AffectedGroups,
 		New:            ch.New,
