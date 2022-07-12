@@ -275,15 +275,6 @@
    },
    "type": "object"
   },
-  "AlertRuleGroupMetadata": {
-   "properties": {
-    "interval": {
-     "format": "int64",
-     "type": "integer"
-    }
-   },
-   "type": "object"
-  },
   "AlertingRule": {
    "description": "adapted from cortex",
    "properties": {
@@ -2761,7 +2752,6 @@
    "type": "object"
   },
   "alertGroup": {
-   "description": "AlertGroup alert group",
    "properties": {
     "alerts": {
      "description": "alerts",
@@ -2955,7 +2945,6 @@
    "type": "array"
   },
   "gettableSilence": {
-   "description": "GettableSilence gettable silence",
    "properties": {
     "comment": {
      "description": "comment",
@@ -3114,7 +3103,6 @@
    "type": "array"
   },
   "postableSilence": {
-   "description": "PostableSilence postable silence",
    "properties": {
     "comment": {
      "description": "comment",
@@ -3152,6 +3140,7 @@
    "type": "object"
   },
   "receiver": {
+   "description": "Receiver receiver",
    "properties": {
     "name": {
      "description": "name",
@@ -3562,15 +3551,15 @@
       "in": "body",
       "name": "Body",
       "schema": {
-       "$ref": "#/definitions/AlertRuleGroupMetadata"
+       "$ref": "#/definitions/AlertRuleGroup"
       }
      }
     ],
     "responses": {
      "200": {
-      "description": "AlertRuleGroupMetadata",
+      "description": "AlertRuleGroup",
       "schema": {
-       "$ref": "#/definitions/AlertRuleGroupMetadata"
+       "$ref": "#/definitions/AlertRuleGroup"
       }
      },
      "400": {

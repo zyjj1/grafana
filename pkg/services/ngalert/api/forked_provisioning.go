@@ -103,6 +103,6 @@ func (f *ForkedProvisioningApi) forkRouteGetAlertRuleGroup(ctx *models.ReqContex
 	return f.svc.RouteGetAlertRuleGroup(ctx, folder, group)
 }
 
-func (f *ForkedProvisioningApi) forkRoutePutAlertRuleGroup(ctx *models.ReqContext, ag apimodels.AlertRuleGroupMetadata, folder, group string) response.Response {
+func (f *ForkedProvisioningApi) forkRoutePutAlertRuleGroup(ctx *models.ReqContext, ag apimodels.AlertRuleGroup, folder, group string) response.Response {
 	return f.svc.RoutePutAlertRuleGroup(ctx, ag, folder, group)
 }

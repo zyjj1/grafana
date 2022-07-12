@@ -120,7 +120,7 @@ func (f *ForkedProvisioningApi) RoutePutAlertRule(ctx *models.ReqContext) respon
 func (f *ForkedProvisioningApi) RoutePutAlertRuleGroup(ctx *models.ReqContext) response.Response {
 	folderUIDParam := web.Params(ctx.Req)[":FolderUID"]
 	groupParam := web.Params(ctx.Req)[":Group"]
-	conf := apimodels.AlertRuleGroupMetadata{}
+	conf := apimodels.AlertRuleGroup{}
 	if err := web.Bind(ctx.Req, &conf); err != nil {
 		return response.Error(http.StatusBadRequest, "bad request data", err)
 	}

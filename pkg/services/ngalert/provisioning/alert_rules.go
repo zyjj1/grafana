@@ -147,6 +147,10 @@ func (service *AlertRuleService) UpdateRuleGroup(ctx context.Context, orgID int6
 	})
 }
 
+func (service *AlertRuleService) ReplaceRuleGroup(ctx context.Context, orgID int64, group definitions.AlertRuleGroup) error {
+	return nil
+}
+
 // CreateAlertRule creates a new alert rule. This function will ignore any
 // interval that is set in the rule struct and fetch the current group interval
 // from database.
