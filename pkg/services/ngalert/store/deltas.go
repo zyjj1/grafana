@@ -32,16 +32,21 @@ func (c *GroupDelta) IsEmpty() bool {
 	return len(c.Update)+len(c.New)+len(c.Delete) == 0
 }
 
+type RuleReader interface {
+	ListAlertRules(ctx context.Context, query *ngmodels.ListAlertRulesQuery) error
+	GetAlertRulesGroupByRuleUID(ctx context.Context, query *ngmodels.GetAlertRulesGroupByRuleUIDQuery) error
+}
+
 // CalculateChanges calculates the difference between rules in the group in the database and the submitted rules. If a submitted rule has UID it tries to find it in the database (in other groups).
 // returns a list of rules that need to be added, updated and deleted. Deleted considered rules in the database that belong to the group but do not exist in the list of submitted rules.
-func CalculateChanges(ctx context.Context, ruleStore RuleStore, groupKey models.AlertRuleGroupKey, submittedRules []*models.AlertRule) (*GroupDelta, error) {
+func CalculateChanges(ctx context.Context, ruleReader RuleReader, groupKey models.AlertRuleGroupKey, submittedRules []*models.AlertRule) (*GroupDelta, error) {
 	affectedGroups := make(map[models.AlertRuleGroupKey]models.RulesGroup)
 	q := &models.ListAlertRulesQuery{
 		OrgID:         groupKey.OrgID,
 		NamespaceUIDs: []string{groupKey.NamespaceUID},
 		RuleGroup:     groupKey.RuleGroup,
 	}
-	if err := ruleStore.ListAlertRules(ctx, q); err != nil {
+	if err := ruleReader.ListAlertRules(ctx, q); err != nil {
 		return nil, fmt.Errorf("failed to query database for rules in the group %s: %w", groupKey, err)
 	}
 	existingGroupRules := q.Result
@@ -67,7 +72,7 @@ func CalculateChanges(ctx context.Context, ruleStore RuleStore, groupKey models.
 			} else if existing, ok = loadedRulesByUID[r.UID]; !ok { // check the "cache" and if there is no hit, query the database
 				// Rule can be from other group or namespace
 				q := &models.GetAlertRulesGroupByRuleUIDQuery{OrgID: groupKey.OrgID, UID: r.UID}
-				if err := ruleStore.GetAlertRulesGroupByRuleUID(ctx, q); err != nil {
+				if err := ruleReader.GetAlertRulesGroupByRuleUID(ctx, q); err != nil {
 					return nil, fmt.Errorf("failed to query database for a group of alert rules: %w", err)
 				}
 				for _, rule := range q.Result {
