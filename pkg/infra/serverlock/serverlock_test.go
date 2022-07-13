@@ -47,12 +47,28 @@ func TestServerLock(t *testing.T) {
 	})
 
 	t.Run("create lock on first row", func(t *testing.T) {
-		gotLock, err := sl.acquireLock(context.Background(), first)
+		gotLock, _, err := sl.acquireLock(context.Background(), first)
 		require.NoError(t, err)
 		assert.True(t, gotLock)
 
-		gotLock, err = sl.acquireLock(context.Background(), first)
+		gotLock, _, err = sl.acquireLock(context.Background(), first)
 		require.NoError(t, err)
 		assert.False(t, gotLock)
+	})
+
+	t.Run("create lock and then release it", func(t *testing.T) {
+		lock, err := sl.getOrCreate(context.Background(), operationUID)
+
+		gotLock, newVersion, err := sl.acquireLock(context.Background(), lock)
+		require.NoError(t, err)
+		assert.True(t, gotLock)
+
+		err = sl.releaseLock(context.Background(), newVersion, lock)
+		require.NoError(t, err)
+
+		// and now we can acquire it again
+		gotLock2, _, err2 := sl.acquireLock(context.Background(), lock)
+		require.NoError(t, err2)
+		assert.True(t, gotLock2)
 	})
 }

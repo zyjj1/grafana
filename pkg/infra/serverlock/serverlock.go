@@ -33,36 +33,78 @@ func (sl *ServerLockService) LockAndExecute(ctx context.Context, actionName stri
 	}
 
 	// avoid execution if last lock happened less than `maxInterval` ago
-	if rowLock.LastExecution != 0 {
-		lastExecutionTime := time.Unix(rowLock.LastExecution, 0)
-		if time.Since(lastExecutionTime) < maxInterval {
-			return nil
-		}
+	if sl.isLockWithinInterval(rowLock, maxInterval) {
+		return nil
 	}
 
 	// try to get lock based on rowLow version
-	acquiredLock, err := sl.acquireLock(ctx, rowLock)
+	acquiredLock, _, err := sl.acquireLock(ctx, rowLock)
 	if err != nil {
 		return err
 	}
 
+	// everything is ok, so we execute the fn
+	if acquiredLock {
+		fn(ctx)
+	}
+	return nil
+}
+
+// LockExecuteAndRelease executes the same logic as LockAndExecute, but at the end releases the lock,
+// so does not need to wait to it to timeout to execute again
+func (sl *ServerLockService) LockExecuteAndRelease(ctx context.Context, actionName string, maxInterval time.Duration, fn func(ctx context.Context)) error {
+	// gets or creates a lockable row
+	rowLock, err := sl.getOrCreate(ctx, actionName)
+	if err != nil {
+		return err
+	}
+
+	// avoid execution if last lock happened less than `maxInterval` ago
+	if sl.isLockWithinInterval(rowLock, maxInterval) {
+		return nil
+	}
+
+	// try to get lock based on rowLow version
+	acquiredLock, newVersion, err := sl.acquireLock(ctx, rowLock)
+	if err != nil {
+		return err
+	}
+
+	// everything is ok, so we execute the fn
 	if acquiredLock {
 		fn(ctx)
 	}
 
+	// finally we release the lock
+	err = sl.releaseLock(ctx, newVersion, rowLock)
+	if err != nil {
+		// We will not return an error in this case, just log it
+		sl.log.Error("Error releasing lock.", "err", err)
+	}
 	return nil
 }
 
-func (sl *ServerLockService) acquireLock(ctx context.Context, serverLock *serverLock) (bool, error) {
+func (sl *ServerLockService) isLockWithinInterval(rowLock *serverLock, maxInterval time.Duration) bool {
+	if rowLock.LastExecution != 0 {
+		lastExecutionTime := time.Unix(rowLock.LastExecution, 0)
+		if time.Since(lastExecutionTime) < maxInterval {
+			return true
+		}
+	}
+	return false
+}
+
+// acquireLock attempts to acquire a lock, and updates its version
+func (sl *ServerLockService) acquireLock(ctx context.Context, serverLock *serverLock) (bool, int64, error) {
 	var result bool
+	newVersion := serverLock.Version + 1
 
 	err := sl.SQLStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
-		newVersion := serverLock.Version + 1
 		sql := `UPDATE server_lock SET
-			version = ?,
-			last_execution = ?
-		WHERE
-			id = ? AND version = ?`
+					version = ?,
+					last_execution = ?
+				WHERE
+					id = ? AND version = ?`
 
 		res, err := dbSession.Exec(sql, newVersion, time.Now().Unix(), serverLock.Id, serverLock.Version)
 		if err != nil {
@@ -75,7 +117,26 @@ func (sl *ServerLockService) acquireLock(ctx context.Context, serverLock *server
 		return err
 	})
 
-	return result, err
+	return result, newVersion, err
+}
+
+// releaseLock will delete the row at the database from
+func (sl *ServerLockService) releaseLock(ctx context.Context, newVersion int64, serverLock *serverLock) error {
+	err := sl.SQLStore.WithDbSession(ctx, func(dbSession *sqlstore.DBSession) error {
+		sql := `DELETE FROM server_lock WHERE id=? AND version=?`
+
+		res, err := dbSession.Exec(sql, serverLock.Id, newVersion)
+		if err != nil {
+			return err
+		}
+		affected, err := res.RowsAffected()
+		if affected != 1 {
+			sl.log.Debug("Error releasing lock ", "affected", affected)
+		}
+		return err
+	})
+
+	return err
 }
 
 func (sl *ServerLockService) getOrCreate(ctx context.Context, actionName string) (*serverLock, error) {
@@ -104,7 +165,6 @@ func (sl *ServerLockService) getOrCreate(ctx context.Context, actionName string)
 		}
 
 		result = lockRow
-
 		return nil
 	})
 
