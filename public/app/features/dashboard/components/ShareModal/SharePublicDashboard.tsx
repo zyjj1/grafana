@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 
-import { reportInteraction } from '@grafana/runtime/src';
+import { reportInteraction } from '@grafana/runtime';
 import {
   Alert,
   Button,
