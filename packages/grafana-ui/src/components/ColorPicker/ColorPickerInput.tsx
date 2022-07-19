@@ -1,4 +1,4 @@
-import { css } from '@emotion/css';
+import { css, cx } from '@emotion/css';
 import React, { useState, forwardRef } from 'react';
 import { RgbaStringColorPicker } from 'react-colorful';
 import { useThrottleFn } from 'react-use';
@@ -10,6 +10,7 @@ import { ClickOutsideWrapper } from '../ClickOutsideWrapper/ClickOutsideWrapper'
 import { Props as InputProps } from '../Input/Input';
 
 import ColorInput from './ColorInput';
+import { getStyles as getPaletteStyles } from './SpectrumPalette';
 
 export interface ColorPickerInputProps extends Omit<InputProps, 'value' | 'onChange'> {
   value?: string;
@@ -24,6 +25,7 @@ export const ColorPickerInput = forwardRef<HTMLInputElement, ColorPickerInputPro
     const [isOpen, setIsOpen] = useState(false);
     const theme = useTheme2();
     const styles = useStyles2(getStyles);
+    const paletteStyles = useStyles2(getPaletteStyles);
 
     useThrottleFn(
       (c) => {
@@ -41,16 +43,15 @@ export const ColorPickerInput = forwardRef<HTMLInputElement, ColorPickerInputPro
     return (
       <ClickOutsideWrapper onClick={() => setIsOpen(false)}>
         <div className={styles.wrapper}>
-          {isOpen && <RgbaStringColorPicker color={currentColor} onChange={setColor} className={styles.picker} />}
-          <div onClick={() => setIsOpen(true)}>
-            <ColorInput
-              {...inputProps}
-              theme={theme}
+          {isOpen && (
+            <RgbaStringColorPicker
               color={currentColor}
               onChange={setColor}
-              className={styles.input}
-              ref={ref}
+              className={cx(paletteStyles.root, styles.picker)}
             />
+          )}
+          <div onClick={() => setIsOpen(true)}>
+            <ColorInput {...inputProps} theme={theme} color={currentColor} onChange={setColor} ref={ref} />
           </div>
         </div>
       </ClickOutsideWrapper>
@@ -66,12 +67,15 @@ const getStyles = (theme: GrafanaTheme2) => {
       position: relative;
     `,
     picker: css`
-      position: absolute;
-      bottom: 4px;
-      padding: 2px;
-      border-radius: 8px;
-      background: ${theme.colors.border.medium};
+      &.react-colorful {
+        position: absolute;
+        width: 100%;
+        z-index: 11;
+        bottom: 36px;
+      }
     `,
-    input: css``,
+    inner: css`
+      position: absolute;
+    `,
   };
 };
