@@ -330,7 +330,8 @@ require (
 )
 
 // Use fork of crewjam/saml with fixes for some issues until changes get merged into upstream
-replace github.com/crewjam/saml => github.com/grafana/saml v0.4.9-0.20220719135538-bb74246b757e
+// replace github.com/crewjam/saml => github.com/grafana/saml v0.4.9-0.20220719135538-bb74246b757e
+replace github.com/crewjam/saml => ../saml
 
 replace github.com/apache/thrift => github.com/apache/thrift v0.14.1
 
