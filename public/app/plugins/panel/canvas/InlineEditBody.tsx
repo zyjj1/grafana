@@ -51,19 +51,40 @@ export const InlineEditBody = () => {
     return getOptionsPaneCategoryDescriptor({}, supplier);
   }, [instanceState]);
 
-  return (
-    <div>
-      <div>{pane.items.map((v) => v.render())}</div>
+  // TODO - just a tryout to display the inner categories; skipped the Colors
+  // iterating through category.categories also errors so I used category.categories[1] to skip than while investigating
+  const renderOptions = (categories: OptionsPaneCategoryDescriptor[]) => {
+    return (
       <div>
-        {pane.categories.map((c) => {
+        {categories.map((category) => {
           return (
-            <div key={c.props.id} className={styles.wrap}>
-              <h5>{c.props.title}</h5>
-              <div className={styles.item}>{c.items.map((s) => s.render())}</div>
+            <div key={category.props.id} className={styles.wrap}>
+              <h5>{category.props.title}</h5>
+              <div className={styles.item}>
+                {category.items.filter((it) => it.props.title !== 'Color').map((s) => s.render())}
+              </div>
+              {/*{renderOptions(category.categories)}*/}
+              {category.categories.length > 0 && (
+                <>
+                  <div key={category.categories[1].props.id} className={styles.wrap}>
+                    <h5>{category.categories[1].props.title}</h5>
+                    <div className={styles.item}>
+                      {category.categories[1].items.filter((it) => it.props.title !== 'Color').map((s) => s.render())}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           );
         })}
       </div>
+    );
+  };
+
+  return (
+    <div>
+      <div>{pane.items.map((v) => v.render())}</div>
+      <div>{renderOptions(pane.categories)}</div>
     </div>
   );
 };
