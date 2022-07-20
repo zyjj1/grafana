@@ -129,21 +129,24 @@ func (s *CorrelationsService) getCorrelationHandler(c *models.ReqContext) respon
 	return response.JSON(http.StatusOK, correlation)
 }
 
-// getCorrelationHandler handles GET /datasources/uid/:uid/correlations/
+// getCorrelationsBySourceUIDHandler handles GET /datasources/uid/:uid/correlations
 func (s *CorrelationsService) getCorrelationsBySourceUIDHandler(c *models.ReqContext) response.Response {
 	query := GetCorrelationsBySourceUIDQuery{
 		SourceUID: web.Params(c.Req)[":uid"],
 		OrgId:     c.OrgId,
 	}
 
-	correlation, err := s.getCorrelationsBySourceUID(c.Req.Context(), query)
+	correlations, err := s.getCorrelationsBySourceUID(c.Req.Context(), query)
 	if err != nil {
 		if errors.Is(err, ErrCorrelationNotFound) {
-			return response.Error(http.StatusNotFound, "Correlation not found", err)
+			return response.Error(http.StatusNotFound, "No correlation found", err)
+		}
+		if errors.Is(err, ErrSourceDataSourceDoesNotExists) {
+			return response.Error(http.StatusNotFound, "Source data source not found", err)
 		}
 
 		return response.Error(http.StatusInternalServerError, "Failed to update correlation", err)
 	}
 
-	return response.JSON(http.StatusOK, correlation)
+	return response.JSON(http.StatusOK, correlations)
 }

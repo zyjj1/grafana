@@ -113,3 +113,26 @@ type GetCorrelationResponse struct {
 	// in: body
 	Body correlations.CorrelationDTO `json:"body"`
 }
+
+// swagger:route GET /datasources/uid/{uid}/correlations correlations getCorrelationsBySourceUID
+//
+// Gets all correlations originating from the given data source.
+//
+// Responses:
+// 200: getCorrelationsBySourceUIDResponse
+// 401: unauthorisedError
+// 404: notFoundError
+// 500: internalServerError
+
+// swagger:parameters getCorrelationsBySourceUID
+type GetCorrelationsBySourceUIDParams struct {
+	// in:path
+	// required:true
+	DatasourceUID string `json:"uid"`
+}
+
+//swagger:response getCorrelationsBySourceUIDResponse
+type GetCorrelationsBySourceUIDResponse struct {
+	// in: body
+	Body []correlations.CorrelationDTO `json:"body"`
+}

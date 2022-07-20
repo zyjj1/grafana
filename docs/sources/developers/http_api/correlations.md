@@ -185,3 +185,47 @@ Status codes:
 - **401** – Unauthorized
 - **404** – Not found, either source data source or correlation were not found
 - **500** – Internal error
+
+## Get all correlations originating from a given data source
+
+`POST /api/datasources/uid/:uid/correlations`
+
+Get all correlations originating from the data source identified by the given UID in the path.
+
+**Example request:**
+
+```http
+GET /api/datasources/uid/uyBf2637k/correlations HTTP/1.1
+Accept: application/json
+Authorization: Bearer eyJrIjoiT0tTcG1pUlY2RnVKZTFVaDFsNFZXdE9ZWmNrMkZYbk
+```
+
+**Example response:**
+
+```http
+HTTP/1.1 200
+Content-Type: application/json
+[
+  {
+    "description": "Logs to Traces",
+    "label": "My Label",
+    "sourceUid": "uyBf2637k",
+    "targetUid": "PDDA8E780A17E7EF1",
+    "uid": "J6gn7d31L"
+  },
+  {
+    "description": "Logs to Metrics",
+    "label": "Another Label",
+    "sourceUid": "uyBf2637k",
+    "targetUid": "P15396BDD62B2BE29",
+    "uid": "uWCpURgVk"
+  }
+]
+```
+
+Status codes:
+
+- **200** – OK
+- **401** – Unauthorized
+- **404** – Not found, either source data source id not found or no correlation exists for the given data source
+- **500** – Internal error

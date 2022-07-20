@@ -3640,6 +3640,33 @@
       }
     },
     "/datasources/uid/{uid}/correlations": {
+      "get": {
+        "tags": ["correlations"],
+        "summary": "Gets all correlations originating from the given data source.",
+        "operationId": "getCorrelationsBySourceUID",
+        "parameters": [
+          {
+            "type": "string",
+            "name": "uid",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/getCorrelationsBySourceUIDResponse"
+          },
+          "401": {
+            "$ref": "#/responses/unauthorisedError"
+          },
+          "404": {
+            "$ref": "#/responses/notFoundError"
+          },
+          "500": {
+            "$ref": "#/responses/internalServerError"
+          }
+        }
+      },
       "post": {
         "tags": ["correlations"],
         "summary": "Add correlation.",
@@ -3707,9 +3734,6 @@
           },
           "401": {
             "$ref": "#/responses/unauthorisedError"
-          },
-          "403": {
-            "$ref": "#/responses/forbiddenError"
           },
           "404": {
             "$ref": "#/responses/notFoundError"
@@ -17423,6 +17447,15 @@
       "description": "",
       "schema": {
         "$ref": "#/definitions/CorrelationDTO"
+      }
+    },
+    "getCorrelationsBySourceUIDResponse": {
+      "description": "",
+      "schema": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/CorrelationDTO"
+        }
       }
     },
     "getCustomPermissionsReportResponse": {
