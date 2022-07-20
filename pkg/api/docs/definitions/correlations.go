@@ -131,8 +131,18 @@ type GetCorrelationsBySourceUIDParams struct {
 	DatasourceUID string `json:"uid"`
 }
 
-//swagger:response getCorrelationsBySourceUIDResponse
-type GetCorrelationsBySourceUIDResponse struct {
+// swagger:route GET /datasources/uid/correlations correlations getCorrelations
+//
+// Gets all correlations.
+//
+// Responses:
+// 200: getCorrelationsResponse
+// 401: unauthorisedError
+// 404: notFoundError
+// 500: internalServerError
+
+//swagger:response getCorrelationsResponse
+type GetCorrelations struct {
 	// in: body
 	Body []correlations.CorrelationDTO `json:"body"`
 }
