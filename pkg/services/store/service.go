@@ -34,8 +34,8 @@ const brandingStorage = "branding"
 const SystemBrandingStorage = "system/" + brandingStorage
 
 var (
-	SystemBrandingReader = &models.SignedInUser{OrgId: ac.GlobalOrgID}
-	SystemBrandingAdmin  = &models.SignedInUser{OrgId: ac.GlobalOrgID}
+	SystemBrandingReader = &models.SignedInUser{OrgId: 1}
+	SystemBrandingAdmin  = &models.SignedInUser{OrgId: 1}
 )
 
 const MAX_UPLOAD_SIZE = 1 * 1024 * 1024 // 3MB
@@ -95,11 +95,6 @@ func ProvideService(sql *sqlstore.SQLStore, features featuremgmt.FeatureToggles,
 			},
 		}).setReadOnly(true).setBuiltin(true).
 			setDescription("Access files from the static public files"),
-		newSQLStorage(RootSystem,
-			"System",
-			&StorageSQLConfig{orgId: ac.GlobalOrgID},
-			sql,
-		).setBuiltin(true).setDescription("Grafana system storage"),
 	}
 
 	// Development dashboards
@@ -147,14 +142,14 @@ func ProvideService(sql *sqlstore.SQLStore, features featuremgmt.FeatureToggles,
 		if storageName == RootSystem {
 			if user == SystemBrandingReader {
 				return map[string]filestorage.PathFilter{
-					ActionFilesRead:   filestorage.NewPathFilter([]string{filestorage.Delimiter + brandingStorage + filestorage.Delimiter}, []string{filestorage.Delimiter + brandingStorage}, nil, nil),
+					ActionFilesRead:   createSystemBrandingPathFilter(),
 					ActionFilesWrite:  denyAllPathFilter,
 					ActionFilesDelete: denyAllPathFilter,
 				}
 			}
 
 			if user == SystemBrandingAdmin {
-				systemBrandingFilter := filestorage.NewPathFilter([]string{filestorage.Delimiter + brandingStorage + filestorage.Delimiter}, []string{filestorage.Delimiter + brandingStorage}, nil, nil)
+				systemBrandingFilter := createSystemBrandingPathFilter()
 				return map[string]filestorage.PathFilter{
 					ActionFilesRead:   systemBrandingFilter,
 					ActionFilesWrite:  systemBrandingFilter,
@@ -198,6 +193,14 @@ func ProvideService(sql *sqlstore.SQLStore, features featuremgmt.FeatureToggles,
 	})
 
 	return newStandardStorageService(sql, globalRoots, initializeOrgStorages, authService)
+}
+
+func createSystemBrandingPathFilter() filestorage.PathFilter {
+	return filestorage.NewPathFilter(
+		[]string{filestorage.Delimiter + brandingStorage + filestorage.Delimiter}, // access to all folders and files inside `/branding/`
+		[]string{filestorage.Delimiter + brandingStorage},                         // access to the `/branding` folder itself, but not to any other sibling folder
+		nil,
+		nil)
 }
 
 func newStandardStorageService(sql *sqlstore.SQLStore, globalRoots []storageRuntime, initializeOrgStorages func(orgId int64) []storageRuntime, authService storageAuthService) *standardStorageService {
