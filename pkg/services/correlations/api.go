@@ -17,10 +17,17 @@ func (s *CorrelationsService) registerAPIEndpoints() {
 	uidScope := datasources.ScopeProvider.GetResourceScopeUID(ac.Parameter(":uid"))
 	authorize := ac.Middleware(s.AccessControl)
 
+	// GET TODO: "/api/datasources/correlations" get all correlations
 	s.RouteRegister.Group("/api/datasources/uid/:uid/correlations", func(entities routing.RouteRegister) {
-		entities.Post("/", authorize(ac.ReqOrgAdmin, ac.EvalPermission(datasources.ActionWrite, uidScope)), routing.Wrap(s.createHandler))
-		entities.Delete("/:correlationUid", authorize(ac.ReqOrgAdmin, ac.EvalPermission(datasources.ActionWrite, uidScope)), routing.Wrap(s.deleteHandler))
-		entities.Put("/:correlationUid", authorize(ac.ReqOrgAdmin, ac.EvalPermission(datasources.ActionWrite, uidScope)), routing.Wrap(s.updateHandler))
+		entities.Get("/", authorize(ac.ReqViewer, ac.EvalPermission(datasources.ActionRead, uidScope)), routing.Wrap(s.getCorrelationsBySourceUIDHandler))
+		entities.Post("/", authorize(ac.ReqOrgAdminOrEditor, ac.EvalPermission(datasources.ActionWrite, uidScope)), routing.Wrap(s.createHandler))
+
+		entities.Group("/:correlationUid", func(entities routing.RouteRegister) {
+			entities.Get("/", authorize(ac.ReqViewer, ac.EvalPermission(datasources.ActionRead, uidScope)), routing.Wrap(s.getCorrelationHandler))
+			entities.Delete("/", authorize(ac.ReqOrgAdminOrEditor, ac.EvalPermission(datasources.ActionWrite, uidScope)), routing.Wrap(s.deleteHandler))
+			entities.Put("/", authorize(ac.ReqOrgAdminOrEditor, ac.EvalPermission(datasources.ActionWrite, uidScope)), routing.Wrap(s.updateHandler))
+		})
+
 	})
 }
 
@@ -97,4 +104,46 @@ func (s *CorrelationsService) updateHandler(c *models.ReqContext) response.Respo
 	}
 
 	return response.JSON(http.StatusOK, UpdateCorrelationResponse{Message: "Correlation updated", Result: correlation})
+}
+
+// getCorrelationHandler handles GET /datasources/uid/:uid/correlations/:correlationUid
+func (s *CorrelationsService) getCorrelationHandler(c *models.ReqContext) response.Response {
+	query := GetCorrelationQuery{
+		UID:       web.Params(c.Req)[":correlationUid"],
+		SourceUID: web.Params(c.Req)[":uid"],
+		OrgId:     c.OrgId,
+	}
+
+	correlation, err := s.getCorrelation(c.Req.Context(), query)
+	if err != nil {
+		if errors.Is(err, ErrCorrelationNotFound) {
+			return response.Error(http.StatusNotFound, "Correlation not found", err)
+		}
+		if errors.Is(err, ErrSourceDataSourceDoesNotExists) {
+			return response.Error(http.StatusNotFound, "Source data source not found", err)
+		}
+
+		return response.Error(http.StatusInternalServerError, "Failed to update correlation", err)
+	}
+
+	return response.JSON(http.StatusOK, correlation)
+}
+
+// getCorrelationHandler handles GET /datasources/uid/:uid/correlations/
+func (s *CorrelationsService) getCorrelationsBySourceUIDHandler(c *models.ReqContext) response.Response {
+	query := GetCorrelationsBySourceUIDQuery{
+		SourceUID: web.Params(c.Req)[":uid"],
+		OrgId:     c.OrgId,
+	}
+
+	correlation, err := s.getCorrelationsBySourceUID(c.Req.Context(), query)
+	if err != nil {
+		if errors.Is(err, ErrCorrelationNotFound) {
+			return response.Error(http.StatusNotFound, "Correlation not found", err)
+		}
+
+		return response.Error(http.StatusInternalServerError, "Failed to update correlation", err)
+	}
+
+	return response.JSON(http.StatusOK, correlation)
 }

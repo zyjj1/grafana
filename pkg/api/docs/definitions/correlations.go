@@ -87,3 +87,29 @@ type UpdateCorrelationResponse struct {
 	// in: body
 	Body correlations.UpdateCorrelationResponse `json:"body"`
 }
+
+// swagger:route GET /datasources/uid/{uid}/correlations/{correlationUid} correlations getCorrelation
+//
+// Gets a correlation.
+//
+// Responses:
+// 200: getCorrelationResponse
+// 401: unauthorisedError
+// 404: notFoundError
+// 500: internalServerError
+
+// swagger:parameters getCorrelation
+type GetCorrelationParams struct {
+	// in:path
+	// required:true
+	DatasourceUID string `json:"uid"`
+	// in:path
+	// required:true
+	CorrelationUID string `json:"correlationUid"`
+}
+
+//swagger:response getCorrelationResponse
+type GetCorrelationResponse struct {
+	// in: body
+	Body correlations.CorrelationDTO `json:"body"`
+}

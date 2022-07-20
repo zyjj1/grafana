@@ -3683,6 +3683,42 @@
       }
     },
     "/datasources/uid/{uid}/correlations/{correlationUid}": {
+      "get": {
+        "tags": ["correlations"],
+        "summary": "Gets a correlation.",
+        "operationId": "getCorrelation",
+        "parameters": [
+          {
+            "type": "string",
+            "name": "uid",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "name": "correlationUid",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/responses/getCorrelationResponse"
+          },
+          "401": {
+            "$ref": "#/responses/unauthorisedError"
+          },
+          "403": {
+            "$ref": "#/responses/forbiddenError"
+          },
+          "404": {
+            "$ref": "#/responses/notFoundError"
+          },
+          "500": {
+            "$ref": "#/responses/internalServerError"
+          }
+        }
+      },
       "put": {
         "tags": ["correlations"],
         "summary": "Updates a correlation.",
@@ -17381,6 +17417,12 @@
         "items": {
           "$ref": "#/definitions/UserToken"
         }
+      }
+    },
+    "getCorrelationResponse": {
+      "description": "",
+      "schema": {
+        "$ref": "#/definitions/CorrelationDTO"
       }
     },
     "getCustomPermissionsReportResponse": {
