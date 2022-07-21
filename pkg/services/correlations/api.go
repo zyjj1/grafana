@@ -28,7 +28,6 @@ func (s *CorrelationsService) registerAPIEndpoints() {
 			entities.Delete("/", authorize(ac.ReqOrgAdminOrEditor, ac.EvalPermission(datasources.ActionWrite, uidScope)), routing.Wrap(s.deleteHandler))
 			entities.Put("/", authorize(ac.ReqOrgAdminOrEditor, ac.EvalPermission(datasources.ActionWrite, uidScope)), routing.Wrap(s.updateHandler))
 		})
-
 	})
 }
 
