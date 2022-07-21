@@ -17,9 +17,9 @@ import { getNextRequestId } from 'app/features/query/state/PanelQueryRunner';
 import { runRequest } from 'app/features/query/state/runRequest';
 
 import { SceneObjectBase } from '../core/SceneObjectBase';
-import { SceneObjectState } from '../core/types';
+import { SceneObjectStatePlain } from '../core/types';
 
-export interface QueryRunnerState extends SceneObjectState {
+export interface QueryRunnerState extends SceneObjectStatePlain {
   data?: PanelData;
   queries: DataQueryExtended[];
 }
@@ -31,8 +31,8 @@ export interface DataQueryExtended extends DataQuery {
 export class SceneQueryRunner extends SceneObjectBase<QueryRunnerState> {
   private querySub?: Unsubscribable;
 
-  onMount() {
-    super.onMount();
+  activate() {
+    super.activate();
 
     const timeRange = this.getTimeRange();
 
@@ -49,12 +49,9 @@ export class SceneQueryRunner extends SceneObjectBase<QueryRunnerState> {
     }
   }
 
-  onUnmount() {
-    super.onUnmount();
-    this.cleanUp();
-  }
+  deactivate(): void {
+    super.deactivate();
 
-  cleanUp() {
     if (this.querySub) {
       this.querySub.unsubscribe();
       this.querySub = undefined;
@@ -107,8 +104,6 @@ export class SceneQueryRunner extends SceneObjectBase<QueryRunnerState> {
 
       request.interval = norm.interval;
       request.intervalMs = norm.intervalMs;
-
-      console.log('Query runner run');
 
       this.querySub = runRequest(ds, request).subscribe({
         next: (data) => {
