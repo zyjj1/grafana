@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
+	"xorm.io/core"
 	"xorm.io/xorm"
 
 	"github.com/grafana/grafana/pkg/bus"
@@ -160,6 +161,10 @@ func (ss *SQLStore) Quote(value string) string {
 // GetDialect return the dialect
 func (ss *SQLStore) GetDialect() migrator.Dialect {
 	return ss.Dialect
+}
+
+func (ss *SQLStore) GetDB() *core.DB {
+	return ss.engine.DB()
 }
 
 func (ss *SQLStore) ensureMainOrgAndAdminUser() error {
