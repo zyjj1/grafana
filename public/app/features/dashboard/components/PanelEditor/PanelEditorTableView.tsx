@@ -30,9 +30,9 @@ export function PanelEditorTableView({ width, height, panel, dashboard }: Props)
   // Subscribe to panel event
   useEffect(() => {
     const timeSrv = getTimeSrv();
-    const timeData = applyPanelTimeOverrides(panel, timeSrv.timeRange());
-
+    let timeData = applyPanelTimeOverrides(panel, timeSrv.timeRange());
     const sub = panel.events.subscribe(RefreshEvent, () => {
+      timeData = applyPanelTimeOverrides(panel, timeSrv.timeRange());
       panel.runAllPanelQueries(dashboard.id, dashboard.getTimezone(), timeData, width);
     });
     return () => {
@@ -45,7 +45,7 @@ export function PanelEditorTableView({ width, height, panel, dashboard }: Props)
   }
 
   return (
-    <PanelChrome width={width} height={height} padding="none">
+    <PanelChrome width={width} height={height} padding="none" data-testid="panel-editor-table-view">
       {(innerWidth, innerHeight) => (
         <>
           <PanelHeaderCorner panel={panel} error={data?.error?.message} />
