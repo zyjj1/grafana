@@ -10,11 +10,11 @@ import {
   dateTime,
   TimeRange,
 } from '@grafana/data';
+import { getPanelPlugin } from '@grafana/data/test/__mocks__/pluginMocks';
+import { mockStandardFieldConfigOptions } from '@grafana/data/test/helpers/fieldConfig';
 import { setTemplateSrv } from '@grafana/runtime';
 import { queryBuilder } from 'app/features/variables/shared/testing/builders';
 
-import { mockStandardFieldConfigOptions } from '../../../../test/helpers/fieldConfig';
-import { getPanelPlugin } from '../../plugins/__mocks__/pluginMocks';
 import { PanelQueryRunner } from '../../query/state/PanelQueryRunner';
 import { TemplateSrv } from '../../templating/template_srv';
 import { variableAdapters } from '../../variables/adapters';
@@ -492,6 +492,7 @@ describe('PanelModel', () => {
           run: jest.fn(),
         });
         const dashboardId = 123;
+        const dashboardUID = 'ggHbN42mk';
         const dashboardTimezone = 'browser';
         const width = 860;
         const timeData = {
@@ -506,7 +507,7 @@ describe('PanelModel', () => {
           } as TimeRange,
         } as TimeOverrideResult;
 
-        model.runAllPanelQueries(dashboardId, dashboardTimezone, timeData, width);
+        model.runAllPanelQueries({ dashboardId, dashboardUID, dashboardTimezone, timeData, width });
 
         expect(model.getQueryRunner).toBeCalled();
       });

@@ -68,7 +68,7 @@ export function buildNavModel(dataSource: DataSourceSettings, plugin: GenericDat
     dsPermissions.tabSuffix = () => ProBadge({ experimentId: permissionsExperimentId, eventVariant: 'trial' });
   }
 
-  if (featureEnabled('dspermissions')) {
+  if (featureEnabled('dspermissions.enforcement')) {
     if (contextSrv.hasPermission(AccessControlAction.DataSourcesPermissionsRead)) {
       navModel.children!.push(dsPermissions);
     }
@@ -121,7 +121,9 @@ export function buildNavModel(dataSource: DataSourceSettings, plugin: GenericDat
   }
 
   if (featureEnabled('caching')) {
-    navModel.children!.push(caching);
+    if (contextSrv.hasPermissionInMetadata(AccessControlAction.DataSourcesCachingRead, dataSource)) {
+      navModel.children!.push(caching);
+    }
   } else if (highlightsEnabled && !isLoadingNav) {
     navModel.children!.push({
       ...caching,

@@ -1,124 +1,45 @@
-import React, { FC, memo, useCallback, useEffect, useMemo } from 'react';
+import React, { CSSProperties, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Cell,
-  Column,
-  TableState,
   useAbsoluteLayout,
+  useExpanded,
   useFilters,
   usePagination,
   useResizeColumns,
   useSortBy,
   useTable,
 } from 'react-table';
-import { FixedSizeList } from 'react-window';
+import { VariableSizeList } from 'react-window';
 
-import { DataFrame, getFieldDisplayName } from '@grafana/data';
+import { Field, ReducerID } from '@grafana/data';
 
-import { useStyles2 } from '../../themes';
+import { useStyles2, useTheme2 } from '../../themes';
 import { CustomScrollbar } from '../CustomScrollbar/CustomScrollbar';
 import { Pagination } from '../Pagination/Pagination';
 
 import { FooterRow } from './FooterRow';
 import { HeaderRow } from './HeaderRow';
 import { TableCell } from './TableCell';
+import { useFixScrollbarContainer, useResetVariableListSizeCache } from './hooks';
+import { getInitialState, useTableStateReducer } from './reducer';
 import { getTableStyles } from './styles';
+import { FooterItem, GrafanaTableState, Props } from './types';
 import {
-  TableColumnResizeActionCallback,
-  TableFilterActionCallback,
-  FooterItem,
-  TableSortByActionCallback,
-  TableSortByFieldState,
-} from './types';
-import { getColumns, sortCaseInsensitive, sortNumber } from './utils';
+  getColumns,
+  sortCaseInsensitive,
+  sortNumber,
+  getFooterItems,
+  createFooterCalculationValues,
+  EXPANDER_WIDTH,
+} from './utils';
 
 const COLUMN_MIN_WIDTH = 150;
 
-export interface Props {
-  ariaLabel?: string;
-  data: DataFrame;
-  width: number;
-  height: number;
-  /** Minimal column width specified in pixels */
-  columnMinWidth?: number;
-  noHeader?: boolean;
-  showTypeIcons?: boolean;
-  resizable?: boolean;
-  initialSortBy?: TableSortByFieldState[];
-  onColumnResize?: TableColumnResizeActionCallback;
-  onSortByChange?: TableSortByActionCallback;
-  onCellFilterAdded?: TableFilterActionCallback;
-  footerValues?: FooterItem[];
-  enablePagination?: boolean;
-}
-
-function useTableStateReducer({ onColumnResize, onSortByChange, data }: Props) {
-  return useCallback(
-    (newState: TableState, action: any) => {
-      switch (action.type) {
-        case 'columnDoneResizing':
-          if (onColumnResize) {
-            const info = (newState.columnResizing.headerIdWidths as any)[0];
-            const columnIdString = info[0];
-            const fieldIndex = parseInt(columnIdString, 10);
-            const width = Math.round(newState.columnResizing.columnWidths[columnIdString] as number);
-
-            const field = data.fields[fieldIndex];
-            if (!field) {
-              return newState;
-            }
-
-            const fieldDisplayName = getFieldDisplayName(field, data);
-            onColumnResize(fieldDisplayName, width);
-          }
-        case 'toggleSortBy':
-          if (onSortByChange) {
-            const sortByFields: TableSortByFieldState[] = [];
-
-            for (const sortItem of newState.sortBy) {
-              const field = data.fields[parseInt(sortItem.id, 10)];
-              if (!field) {
-                continue;
-              }
-
-              sortByFields.push({
-                displayName: getFieldDisplayName(field, data),
-                desc: sortItem.desc,
-              });
-            }
-
-            onSortByChange(sortByFields);
-          }
-          break;
-      }
-
-      return newState;
-    },
-    [data, onColumnResize, onSortByChange]
-  );
-}
-
-function getInitialState(initialSortBy: Props['initialSortBy'], columns: Column[]): Partial<TableState> {
-  const state: Partial<TableState> = {};
-
-  if (initialSortBy) {
-    state.sortBy = [];
-
-    for (const sortBy of initialSortBy) {
-      for (const col of columns) {
-        if (col.Header === sortBy.displayName) {
-          state.sortBy.push({ id: col.id as string, desc: sortBy.desc });
-        }
-      }
-    }
-  }
-
-  return state;
-}
-
-export const Table: FC<Props> = memo((props: Props) => {
+export const Table = memo((props: Props) => {
   const {
     ariaLabel,
     data,
+    subData,
     height,
     onCellFilterAdded,
     width,
@@ -126,23 +47,29 @@ export const Table: FC<Props> = memo((props: Props) => {
     noHeader,
     resizable = true,
     initialSortBy,
-    footerValues,
+    footerOptions,
     showTypeIcons,
+    footerValues,
     enablePagination,
   } = props;
 
+  const listRef = useRef<VariableSizeList>(null);
+  const tableDivRef = useRef<HTMLDivElement>(null);
+  const variableSizeListScrollbarRef = useRef<HTMLDivElement>(null);
   const tableStyles = useStyles2(getTableStyles);
-  const headerHeight = noHeader ? 0 : tableStyles.cellHeight;
+  const theme = useTheme2();
+  const headerHeight = noHeader ? 0 : tableStyles.rowHeight;
+  const [footerItems, setFooterItems] = useState<FooterItem[] | undefined>(footerValues);
 
   const footerHeight = useMemo(() => {
-    const EXTENDED_ROW_HEIGHT = 33;
+    const EXTENDED_ROW_HEIGHT = headerHeight;
     let length = 0;
 
-    if (!footerValues) {
+    if (!footerItems) {
       return 0;
     }
 
-    for (const fv of footerValues) {
+    for (const fv of footerItems) {
       if (Array.isArray(fv) && fv.length > length) {
         length = fv.length;
       }
@@ -153,7 +80,7 @@ export const Table: FC<Props> = memo((props: Props) => {
     }
 
     return EXTENDED_ROW_HEIGHT;
-  }, [footerValues]);
+  }, [footerItems, headerHeight]);
 
   // React table data array. This data acts just like a dummy array to let react-table know how many rows exist
   // The cells use the field to look up values
@@ -167,10 +94,17 @@ export const Table: FC<Props> = memo((props: Props) => {
     return Array(data.length).fill(0);
   }, [data]);
 
+  const isCountRowsSet = Boolean(
+    footerOptions?.countRows &&
+      footerOptions.reducer &&
+      footerOptions.reducer.length &&
+      footerOptions.reducer[0] === ReducerID.count
+  );
+
   // React-table column definitions
   const memoizedColumns = useMemo(
-    () => getColumns(data, width, columnMinWidth, footerValues),
-    [data, width, columnMinWidth, footerValues]
+    () => getColumns(data, width, columnMinWidth, !!subData?.length, footerItems, isCountRowsSet),
+    [data, width, columnMinWidth, footerItems, subData, isCountRowsSet]
   );
 
   // Internal react table state reducer
@@ -204,13 +138,56 @@ export const Table: FC<Props> = memo((props: Props) => {
     gotoPage,
     setPageSize,
     pageOptions,
-  } = useTable(options, useFilters, useSortBy, usePagination, useAbsoluteLayout, useResizeColumns);
+  } = useTable(options, useFilters, useSortBy, useAbsoluteLayout, useResizeColumns, useExpanded, usePagination);
+
+  const extendedState = state as GrafanaTableState;
+
+  /*
+    Footer value calculation is being moved in the Table component and the footerValues prop will be deprecated.
+    The footerValues prop is still used in the Table component for backwards compatibility. Adding the
+    footerOptions prop will switch the Table component to use the new footer calculation. Using both props will
+    result in the footerValues prop being ignored.
+  */
+  useEffect(() => {
+    if (!footerOptions) {
+      setFooterItems(footerValues);
+    }
+  }, [footerValues, footerOptions]);
+
+  useEffect(() => {
+    if (!footerOptions) {
+      return;
+    }
+
+    if (!footerOptions.show) {
+      setFooterItems(undefined);
+      return;
+    }
+
+    const footerItems = getFooterItems(
+      headerGroups[0].headers as unknown as Array<{ field: Field }>,
+      createFooterCalculationValues(rows),
+      footerOptions,
+      theme
+    );
+
+    if (isCountRowsSet) {
+      const footerItemsCountRows: FooterItem[] = new Array(footerItems.length).fill(undefined);
+      footerItemsCountRows[0] = data.length.toString();
+      setFooterItems(footerItemsCountRows);
+    } else {
+      setFooterItems(footerItems);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [footerOptions, theme, state.filters, data]);
 
   let listHeight = height - (headerHeight + footerHeight);
+
   if (enablePagination) {
     listHeight -= tableStyles.cellHeight;
   }
-  const pageSize = Math.round(listHeight / tableStyles.cellHeight) - 1;
+
+  const pageSize = Math.round(listHeight / tableStyles.rowHeight) - 1;
 
   useEffect(() => {
     // Don't update the page size if it is less than 1
@@ -220,15 +197,51 @@ export const Table: FC<Props> = memo((props: Props) => {
     setPageSize(pageSize);
   }, [pageSize, setPageSize]);
 
+  useResetVariableListSizeCache(extendedState, listRef, data);
+  useFixScrollbarContainer(variableSizeListScrollbarRef, tableDivRef);
+
+  const renderSubTable = React.useCallback(
+    (rowIndex: number) => {
+      if (state.expanded[rowIndex]) {
+        const rowSubData = subData?.find((frame) => frame.meta?.custom?.parentRowIndex === rowIndex);
+        if (rowSubData) {
+          const noHeader = !!rowSubData.meta?.custom?.noHeader;
+          const subTableStyle: CSSProperties = {
+            height: tableStyles.rowHeight * (rowSubData.length + (noHeader ? 0 : 1)), // account for the header with + 1
+            background: theme.colors.emphasize(theme.colors.background.primary, 0.015),
+            paddingLeft: EXPANDER_WIDTH,
+            position: 'absolute',
+            bottom: 0,
+          };
+          return (
+            <div style={subTableStyle}>
+              <Table
+                data={rowSubData}
+                width={width - EXPANDER_WIDTH}
+                height={tableStyles.rowHeight * (rowSubData.length + 1)}
+                noHeader={noHeader}
+              />
+            </div>
+          );
+        }
+      }
+      return null;
+    },
+    [state.expanded, subData, tableStyles.rowHeight, theme.colors, width]
+  );
+
   const RenderRow = React.useCallback(
-    ({ index: rowIndex, style }) => {
+    ({ index: rowIndex, style }: { index: number; style: CSSProperties }) => {
       let row = rows[rowIndex];
       if (enablePagination) {
         row = page[rowIndex];
       }
       prepareRow(row);
+
       return (
         <div {...row.getRowProps({ style })} className={tableStyles.row}>
+          {/*add the subtable to the DOM first to prevent a 1px border CSS issue on the last cell of the row*/}
+          {renderSubTable(rowIndex)}
           {row.cells.map((cell: Cell, index: number) => (
             <TableCell
               key={index}
@@ -242,7 +255,7 @@ export const Table: FC<Props> = memo((props: Props) => {
         </div>
       );
     },
-    [onCellFilterAdded, page, enablePagination, prepareRow, rows, tableStyles]
+    [onCellFilterAdded, page, enablePagination, prepareRow, rows, tableStyles, renderSubTable]
   );
 
   const onNavigate = useCallback(
@@ -280,33 +293,60 @@ export const Table: FC<Props> = memo((props: Props) => {
       </div>
     );
   }
+
+  const getItemSize = (index: number): number => {
+    if (state.expanded[index]) {
+      const rowSubData = subData?.find((frame) => frame.meta?.custom?.parentRowIndex === index);
+      if (rowSubData) {
+        const noHeader = !!rowSubData.meta?.custom?.noHeader;
+        return tableStyles.rowHeight * (rowSubData.length + 1 + (noHeader ? 0 : 1)); // account for the header and the row data with + 1 + 1
+      }
+    }
+    return tableStyles.rowHeight;
+  };
+
+  const handleScroll: React.UIEventHandler = (event) => {
+    const { scrollTop } = event.target as HTMLDivElement;
+
+    if (listRef.current !== null) {
+      listRef.current.scrollTo(scrollTop);
+    }
+  };
+
   return (
-    <div {...getTableProps()} className={tableStyles.table} aria-label={ariaLabel} role="table">
+    <div {...getTableProps()} className={tableStyles.table} aria-label={ariaLabel} role="table" ref={tableDivRef}>
       <CustomScrollbar hideVerticalTrack={true}>
         <div className={tableStyles.tableContentWrapper(totalColumnsWidth)}>
-          {!noHeader && <HeaderRow headerGroups={headerGroups} showTypeIcons={showTypeIcons} />}
+          {!noHeader && (
+            <HeaderRow headerGroups={headerGroups} showTypeIcons={showTypeIcons} tableStyles={tableStyles} />
+          )}
           {itemCount > 0 ? (
-            <FixedSizeList
-              height={listHeight}
-              itemCount={itemCount}
-              itemSize={tableStyles.rowHeight}
-              width={'100%'}
-              style={{ overflow: 'hidden auto' }}
-            >
-              {RenderRow}
-            </FixedSizeList>
+            <div ref={variableSizeListScrollbarRef}>
+              <CustomScrollbar onScroll={handleScroll} hideHorizontalTrack={true}>
+                <VariableSizeList
+                  height={listHeight}
+                  itemCount={itemCount}
+                  itemSize={getItemSize}
+                  width={'100%'}
+                  ref={listRef}
+                  style={{ overflow: undefined }}
+                >
+                  {RenderRow}
+                </VariableSizeList>
+              </CustomScrollbar>
+            </div>
           ) : (
             <div style={{ height: height - headerHeight }} className={tableStyles.noData}>
               No data
             </div>
           )}
-          {footerValues && (
+          {footerItems && (
             <FooterRow
-              height={footerHeight}
               isPaginationVisible={Boolean(enablePagination)}
-              footerValues={footerValues}
+              footerValues={footerItems}
               footerGroups={footerGroups}
               totalColumnsWidth={totalColumnsWidth}
+              tableStyles={tableStyles}
             />
           )}
         </div>

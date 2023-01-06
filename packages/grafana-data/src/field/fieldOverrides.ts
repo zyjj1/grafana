@@ -1,13 +1,18 @@
 import { isNumber, set, unset, get, cloneDeep } from 'lodash';
+import { useMemo, useRef } from 'react';
+import usePrevious from 'react-use/lib/usePrevious';
 
-import { guessFieldTypeForField } from '../dataframe';
+import { compareArrayValues, compareDataFrameStructures, guessFieldTypeForField } from '../dataframe';
 import { getTimeField } from '../dataframe/processDataFrame';
+import { PanelPlugin } from '../panel/PanelPlugin';
+import { GrafanaTheme2 } from '../themes';
 import { asHexString } from '../themes/colorManipulator';
 import { fieldMatchers, reduceField, ReducerID } from '../transformations';
 import {
   ApplyFieldOverrideOptions,
   DataFrame,
   DataLink,
+  DecimalCount,
   DisplayProcessor,
   DisplayValue,
   DynamicConfigValue,
@@ -15,11 +20,13 @@ import {
   FieldColorModeId,
   FieldConfig,
   FieldConfigPropertyItem,
+  FieldConfigSource,
   FieldOverrideContext,
   FieldType,
   InterpolateFunction,
   LinkModel,
   NumericRange,
+  PanelData,
   ScopedVars,
   TimeZone,
   ValueLinkConfig,
@@ -213,9 +220,18 @@ export function applyFieldOverrides(options: ApplyFieldOverrideOptions): DataFra
 // 2. have the ability to selectively get display color or text (but not always both, which are each quite expensive)
 // 3. sufficently optimize text formatting and threshold color determinitation
 function cachingDisplayProcessor(disp: DisplayProcessor, maxCacheSize = 2500): DisplayProcessor {
-  const cache = new Map<any, DisplayValue>();
+  type dispCache = Map<any, DisplayValue>;
+  // decimals -> cache mapping, -1 is unspecified decimals
+  const caches = new Map<number, dispCache>();
 
-  return (value: any) => {
+  // pre-init caches for up to 15 decimals
+  for (let i = -1; i <= 15; i++) {
+    caches.set(i, new Map());
+  }
+
+  return (value: any, decimals?: DecimalCount) => {
+    let cache = caches.get(decimals ?? -1)!;
+
     let v = cache.get(value);
 
     if (!v) {
@@ -224,7 +240,7 @@ function cachingDisplayProcessor(disp: DisplayProcessor, maxCacheSize = 2500): D
         cache.clear();
       }
 
-      v = disp(value);
+      v = disp(value, decimals);
 
       // convert to hex6 or hex8 so downstream we can cheaply test for alpha (and set new alpha)
       // via a simple length check (in colorManipulator) rather using slow parsing via tinycolor
@@ -440,9 +456,18 @@ export const getLinksSupplier =
         });
       }
 
-      let href = locationUtil.assureBaseUrl(link.url.replace(/\n/g, ''));
-      href = replaceVariables(href, variables);
-      href = locationUtil.processUrl(href);
+      let href = link.onBuildUrl
+        ? link.onBuildUrl({
+            origin: field,
+            replaceVariables,
+          })
+        : link.url;
+
+      if (href) {
+        locationUtil.assureBaseUrl(href.replace(/\n/g, ''));
+        href = replaceVariables(href, variables);
+        href = locationUtil.processUrl(href);
+      }
 
       const info: LinkModel<Field> = {
         href,
@@ -483,4 +508,50 @@ export function applyRawFieldOverrides(data: DataFrame[]): DataFrame[] {
   }
 
   return newData;
+}
+
+/**
+ * @internal
+ */
+export function useFieldOverrides(
+  plugin: PanelPlugin | undefined,
+  fieldConfig: FieldConfigSource | undefined,
+  data: PanelData | undefined,
+  timeZone: string,
+  theme: GrafanaTheme2,
+  replace: InterpolateFunction
+): PanelData | undefined {
+  const fieldConfigRegistry = plugin?.fieldConfigRegistry;
+  const structureRev = useRef(0);
+  const prevSeries = usePrevious(data?.series);
+
+  return useMemo(() => {
+    if (!fieldConfigRegistry || !fieldConfig || !data) {
+      return;
+    }
+
+    const series = data?.series;
+
+    if (
+      data.structureRev == null &&
+      series &&
+      prevSeries &&
+      !compareArrayValues(series, prevSeries, compareDataFrameStructures)
+    ) {
+      structureRev.current++;
+    }
+
+    return {
+      structureRev: structureRev.current,
+      ...data,
+      series: applyFieldOverrides({
+        data: series,
+        fieldConfig,
+        fieldConfigRegistry,
+        replaceVariables: replace,
+        theme,
+        timeZone,
+      }),
+    };
+  }, [fieldConfigRegistry, fieldConfig, data, prevSeries, timeZone, theme, replace]);
 }

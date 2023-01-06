@@ -75,7 +75,7 @@ export const addLibraryPanel = (dashboard: DashboardModel, panel: PanelModel) =>
       component: AddLibraryPanelModal,
       props: {
         panel,
-        initialFolderId: dashboard.meta.folderId,
+        initialFolderUid: dashboard.meta.folderUid,
         isOpen: true,
       },
     })
@@ -87,10 +87,7 @@ export const unlinkLibraryPanel = (panel: PanelModel) => {
     new ShowModalReactEvent({
       component: UnlinkModal,
       props: {
-        onConfirm: () => {
-          delete panel.libraryPanel;
-          panel.render();
-        },
+        onConfirm: () => panel.unlinkLibraryPanel(),
         isOpen: true,
       },
     })
@@ -102,10 +99,11 @@ export const refreshPanel = (panel: PanelModel) => {
 };
 
 export const toggleLegend = (panel: PanelModel) => {
-  console.warn('Toggle legend is not implemented yet');
-  // We need to set panel.legend defaults first
-  // panel.legend.show = !panel.legend.show;
-  refreshPanel(panel);
+  const newOptions = { ...panel.options };
+  newOptions.legend.showLegend === true
+    ? (newOptions.legend.showLegend = false)
+    : (newOptions.legend.showLegend = true);
+  panel.updateOptions(newOptions);
 };
 
 export interface TimeOverrideResult {

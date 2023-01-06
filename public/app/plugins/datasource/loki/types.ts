@@ -56,6 +56,7 @@ export interface LokiOptions extends DataSourceJsonData {
   derivedFields?: DerivedFieldConfig[];
   alertmanager?: string;
   keepCookies?: string[];
+  enableSecureSocksProxy?: boolean;
 }
 
 export interface LokiStats {
@@ -141,4 +142,15 @@ export interface TransformerOptions {
   refId: string;
   scopedVars: ScopedVars;
   meta?: QueryResultMeta;
+}
+
+export enum LokiVariableQueryType {
+  LabelNames,
+  LabelValues,
+}
+
+export interface LokiVariableQuery extends DataQuery {
+  type: LokiVariableQueryType;
+  label?: string;
+  stream?: string;
 }

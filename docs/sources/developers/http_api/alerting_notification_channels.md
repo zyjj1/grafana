@@ -1,7 +1,6 @@
 ---
 aliases:
-  - /docs/grafana/latest/developers/http_api/alerting_notification_channels/
-  - /docs/grafana/latest/http_api/alerting_notification_channels/
+  - ../../http_api/alerting_notification_channels/
 description: Grafana Alerting Notification Channel HTTP API
 keywords:
   - grafana
@@ -185,7 +184,7 @@ Content-Type: application/json
 
 ## Create notification channel
 
-You can find the full list of [supported notifiers]({{< ref "/docs/grafana/v8.5/alerting/old-alerting/notifications/" >}}) on the alert notifiers page.
+You can find the full list of [supported notifiers](https://grafana.com/docs/grafana/v8.5/alerting/old-alerting/notifications/) on the alert notifiers page.
 
 `POST /api/alert-notifications`
 

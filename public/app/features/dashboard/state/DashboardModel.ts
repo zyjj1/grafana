@@ -17,6 +17,7 @@ import {
   UrlQueryValue,
 } from '@grafana/data';
 import { RefreshEvent, TimeRangeUpdatedEvent } from '@grafana/runtime';
+import { Dashboard } from '@grafana/schema';
 import { DEFAULT_ANNOTATION_COLOR } from '@grafana/ui';
 import { GRID_CELL_HEIGHT, GRID_CELL_VMARGIN, GRID_COLUMN_COUNT, REPEAT_DIR_VERTICAL } from 'app/core/constants';
 import { contextSrv } from 'app/core/services/context_srv';
@@ -25,7 +26,7 @@ import { variableAdapters } from 'app/features/variables/adapters';
 import { onTimeRangeUpdated } from 'app/features/variables/state/actions';
 import { GetVariables, getVariablesByKey } from 'app/features/variables/state/selectors';
 import { CoreEvents, DashboardMeta, KioskMode } from 'app/types';
-import { DashboardPanelsChangedEvent, RenderEvent } from 'app/types/events';
+import { DashboardMetaChangedEvent, DashboardPanelsChangedEvent, RenderEvent } from 'app/types/events';
 
 import { appEvents } from '../../../core/core';
 import { dispatch } from '../../../store/store';
@@ -68,9 +69,9 @@ export interface DashboardLink {
 
 export class DashboardModel implements TimeModel {
   id: any;
-  uid: string;
+  // TODO: use propert type and fix all the places where uid is set to null
+  uid: any;
   title: string;
-  autoUpdate: any;
   description: any;
   tags: any;
   style: any;
@@ -125,17 +126,13 @@ export class DashboardModel implements TimeModel {
     lastRefresh: true,
   };
 
-  constructor(data: any, meta?: DashboardMeta, private getVariablesFromState: GetVariables = getVariablesByKey) {
-    if (!data) {
-      data = {};
-    }
-
+  constructor(data: Dashboard, meta?: DashboardMeta, private getVariablesFromState: GetVariables = getVariablesByKey) {
     this.events = new EventBusSrv();
     this.id = data.id || null;
+    // UID is not there for newly created dashboards
     this.uid = data.uid || null;
-    this.revision = data.revision;
+    this.revision = data.revision || 1;
     this.title = data.title ?? 'No Title';
-    this.autoUpdate = data.autoUpdate;
     this.description = data.description;
     this.tags = data.tags ?? [];
     this.style = data.style ?? 'dark';
@@ -278,6 +275,20 @@ export class DashboardModel implements TimeModel {
           this.isSnapshotTruthy() || !(panel.type === 'add-panel' || panel.repeatPanelId || panel.repeatedByRow)
       )
       .map((panel) => {
+        // Clean libarary panels on save
+        if (panel.libraryPanel) {
+          const { id, title, libraryPanel, gridPos } = panel;
+          return {
+            id,
+            title,
+            gridPos,
+            libraryPanel: {
+              uid: libraryPanel.uid,
+              name: libraryPanel.name,
+            },
+          };
+        }
+
         // If we save while editing we should include the panel in edit mode instead of the
         // unmodified source panel
         if (this.panelInEdit && this.panelInEdit.id === panel.id) {
@@ -480,6 +491,20 @@ export class DashboardModel implements TimeModel {
     this.events.publish(new DashboardPanelsChangedEvent());
   }
 
+  updateMeta(updates: Partial<DashboardMeta>) {
+    this.meta = { ...this.meta, ...updates };
+    this.events.publish(new DashboardMetaChangedEvent());
+  }
+
+  makeEditable() {
+    this.editable = true;
+    this.updateMeta({
+      canMakeEditable: false,
+      canEdit: true,
+      canSave: true,
+    });
+  }
+
   sortPanelsByGridPos() {
     this.panels.sort((panelA, panelB) => {
       if (panelA.gridPos.y === panelB.gridPos.y) {
@@ -493,6 +518,12 @@ export class DashboardModel implements TimeModel {
   clearUnsavedChanges() {
     for (const panel of this.panels) {
       panel.configRev = 0;
+    }
+
+    if (this.panelInEdit) {
+      // Remember that we have a saved a change in panel editor so we apply it when leaving panel edit
+      this.panelInEdit.hasSavedPanelEditChange = this.panelInEdit.configRev > 0;
+      this.panelInEdit.configRev = 0;
     }
   }
 
@@ -1073,12 +1104,13 @@ export class DashboardModel implements TimeModel {
     return this.getVariablesFromState(this.uid);
   }
 
-  canEditAnnotations(dashboardId: number) {
+  canEditAnnotations(dashboardUID?: string) {
     let canEdit = true;
 
     // if RBAC is enabled there are additional conditions to check
     if (contextSrv.accessControlEnabled()) {
-      if (dashboardId === 0) {
+      // dashboardUID is falsy when it is an organizational annotation
+      if (!dashboardUID) {
         canEdit = !!this.meta.annotationsPermissions?.organization.canEdit;
       } else {
         canEdit = !!this.meta.annotationsPermissions?.dashboard.canEdit;
@@ -1087,14 +1119,33 @@ export class DashboardModel implements TimeModel {
     return this.canEditDashboard() && canEdit;
   }
 
+  canDeleteAnnotations(dashboardUID?: string) {
+    let canDelete = true;
+
+    if (contextSrv.accessControlEnabled()) {
+      // dashboardUID is falsy when it is an organizational annotation
+      if (!dashboardUID) {
+        canDelete = !!this.meta.annotationsPermissions?.organization.canDelete;
+      } else {
+        canDelete = !!this.meta.annotationsPermissions?.dashboard.canDelete;
+      }
+    }
+    return canDelete && this.canEditDashboard();
+  }
+
   canAddAnnotations() {
-    // If RBAC is enabled there are additional conditions to check
-    const canAdd = !contextSrv.accessControlEnabled() || this.meta.annotationsPermissions?.dashboard.canAdd;
-    return this.canEditDashboard() && canAdd;
+    // When the builtin annotations are disabled, we should not add any in the UI
+    const found = this.annotations.list.find((item) => item.builtIn === 1);
+    if (found?.enable === false || !this.canEditDashboard()) {
+      return false;
+    }
+
+    // If RBAC is enabled there are additional conditions to check.
+    return !contextSrv.accessControlEnabled() || Boolean(this.meta.annotationsPermissions?.dashboard.canAdd);
   }
 
   canEditDashboard() {
-    return this.meta.canEdit || this.meta.canMakeEditable;
+    return Boolean(this.meta.canEdit || this.meta.canMakeEditable);
   }
 
   shouldUpdateDashboardPanelFromJSON(updatedPanel: PanelModel, panel: PanelModel) {

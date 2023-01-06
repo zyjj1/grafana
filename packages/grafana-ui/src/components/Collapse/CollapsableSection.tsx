@@ -1,6 +1,6 @@
 import { css, cx } from '@emotion/css';
 import { uniqueId } from 'lodash';
-import React, { FC, ReactNode, useRef, useState } from 'react';
+import React, { ReactNode, useRef, useState } from 'react';
 
 import { GrafanaTheme2 } from '@grafana/data';
 
@@ -18,9 +18,11 @@ export interface Props {
   contentClassName?: string;
   loading?: boolean;
   labelId?: string;
+  headerDataTestId?: string;
+  contentDataTestId?: string;
 }
 
-export const CollapsableSection: FC<Props> = ({
+export const CollapsableSection = ({
   label,
   isOpen,
   onToggle,
@@ -29,7 +31,9 @@ export const CollapsableSection: FC<Props> = ({
   children,
   labelId,
   loading = false,
-}) => {
+  headerDataTestId,
+  contentDataTestId,
+}: Props) => {
   const [open, toggleOpen] = useState<boolean>(isOpen);
   const styles = useStyles2(collapsableSectionStyles);
 
@@ -65,12 +69,16 @@ export const CollapsableSection: FC<Props> = ({
             <Icon name={open ? 'angle-up' : 'angle-down'} className={styles.icon} />
           )}
         </button>
-        <div className={styles.label} id={`collapse-label-${id}`}>
+        <div className={styles.label} id={`collapse-label-${id}`} data-testid={headerDataTestId}>
           {label}
         </div>
       </div>
       {open && (
-        <div id={`collapse-content-${id}`} className={cx(styles.content, contentClassName)}>
+        <div
+          id={`collapse-content-${id}`}
+          className={cx(styles.content, contentClassName)}
+          data-testid={contentDataTestId}
+        >
           {children}
         </div>
       )}
@@ -108,7 +116,7 @@ const collapsableSectionStyles = (theme: GrafanaTheme2) => ({
   spinner: css({
     display: 'flex',
     alignItems: 'center',
-    width: theme.v1.spacing.md,
+    width: theme.spacing(2),
   }),
   label: css({
     display: 'flex',

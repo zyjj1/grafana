@@ -18,6 +18,7 @@ import (
 	"github.com/grafana/grafana/pkg/components/simplejson"
 	"github.com/grafana/grafana/pkg/services/alerting"
 	"github.com/grafana/grafana/pkg/services/datasources"
+	ngalertmodels "github.com/grafana/grafana/pkg/services/ngalert/models"
 )
 
 func init() {
@@ -147,7 +148,7 @@ func (c *QueryCondition) executeQuery(context *alerting.EvalContext, timeRange l
 		OrgId: context.Rule.OrgID,
 	}
 
-	if err := context.Store.GetDataSource(context.Ctx, getDsInfo); err != nil {
+	if err := context.GetDataSource(context.Ctx, getDsInfo); err != nil {
 		return nil, fmt.Errorf("could not find datasource: %w", err)
 	}
 
@@ -276,8 +277,8 @@ func (c *QueryCondition) getRequestForAlertRule(datasource *datasources.DataSour
 			},
 		},
 		Headers: map[string]string{
-			"FromAlert":    "true",
-			"X-Cache-Skip": "true",
+			ngalertmodels.FromAlertHeaderName: "true",
+			ngalertmodels.CacheSkipHeaderName: "true",
 		},
 		Debug: debug,
 	}

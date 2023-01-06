@@ -56,7 +56,7 @@ const getStyles = (theme: GrafanaTheme2) => {
   };
 };
 
-type TimelineHeaderRowProps = {
+export type TimelineHeaderRowProps = {
   duration: number;
   nameColumnWidth: number;
   numTicks: number;
@@ -89,7 +89,7 @@ export default function TimelineHeaderRow(props: TimelineHeaderRowProps) {
   const [viewStart, viewEnd] = viewRangeTime.current;
   const styles = useStyles2(getStyles);
   return (
-    <TimelineRow className={styles.TimelineHeaderRow} data-test-id="TimelineHeaderRow">
+    <TimelineRow className={styles.TimelineHeaderRow} data-testid="TimelineHeaderRow">
       <TimelineRow.Cell className={cx(ubFlex, ubPx2, styles.TimelineHeaderWrapper)} width={nameColumnWidth}>
         <h4 className={styles.TimelineHeaderRowTitle}>Service &amp; Operation</h4>
         <TimelineCollapser

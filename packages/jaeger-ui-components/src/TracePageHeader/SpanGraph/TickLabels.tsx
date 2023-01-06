@@ -50,11 +50,15 @@ export default function TickLabels(props: TickLabelsProps) {
     const portion = i / numTicks;
     const style = portion === 1 ? { right: '0%' } : { left: `${portion * 100}%` };
     ticks.push(
-      <div key={portion} className={styles.TickLabelsLabel} style={style} data-test="tick">
+      <div key={portion} className={styles.TickLabelsLabel} style={style} data-testid="tick">
         {formatDuration(duration * portion)}
       </div>
     );
   }
 
-  return <div className={styles.TickLabels}>{ticks}</div>;
+  return (
+    <div className={styles.TickLabels} data-testid="TickLabels">
+      {ticks}
+    </div>
+  );
 }

@@ -82,7 +82,8 @@ export const histogramTransformer: SynchronousDataTransformerInfo<HistogramTrans
     fields: {},
   },
 
-  operator: (options) => (source) => source.pipe(map((data) => histogramTransformer.transformer(options)(data))),
+  operator: (options, ctx) => (source) =>
+    source.pipe(map((data) => histogramTransformer.transformer(options, ctx)(data))),
 
   transformer: (options: HistogramTransformerOptions) => (data: DataFrame[]) => {
     if (!Array.isArray(data) || data.length === 0) {
@@ -220,7 +221,7 @@ export function buildHistogram(frames: DataFrame[], options?: HistogramTransform
           ...field,
           config: {
             ...field.config,
-            unit: undefined,
+            unit: field.config.unit === 'short' ? 'short' : undefined,
           },
         });
         if (!config && field.config.unit) {
@@ -371,6 +372,13 @@ export function histogramFieldsToFrame(info: HistogramFields, theme?: GrafanaThe
     info.bucketMin.display = display;
     info.bucketMax.display = display;
   }
+
+  // ensure updated units are reflected on the count field used for y axis formatting
+  info.counts[0].display = getDisplayProcessor({
+    field: info.counts[0],
+    theme: theme ?? createTheme(),
+  });
+
   return {
     fields: [info.bucketMin, info.bucketMax, ...info.counts],
     length: info.bucketMin.values.length,
