@@ -1,18 +1,24 @@
 import { css, cx } from '@emotion/css';
+import { autoUpdate, flip, shift, useFloating } from '@floating-ui/react';
 import { useDialog } from '@react-aria/dialog';
 import { FocusScope } from '@react-aria/focus';
 import { useOverlay } from '@react-aria/overlays';
 import React, { FormEvent, ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import Calendar from 'react-calendar';
-import { usePopper } from 'react-popper';
 import { useMedia } from 'react-use';
 
 import { dateTimeFormat, DateTime, dateTime, GrafanaTheme2, isDateTime } from '@grafana/data';
+import { Components } from '@grafana/e2e-selectors';
 
-import { Button, HorizontalGroup, Icon, InlineField, Input, Portal } from '../..';
 import { useStyles2, useTheme2 } from '../../../themes';
+import { Button } from '../../Button/Button';
+import { InlineField } from '../../Forms/InlineField';
+import { Icon } from '../../Icon/Icon';
+import { Input } from '../../Input/Input';
+import { HorizontalGroup } from '../../Layout/Layout';
 import { getModalStyles } from '../../Modal/getModalStyles';
-import { TimeOfDayPicker } from '../TimeOfDayPicker';
+import { Portal } from '../../Portal/Portal';
+import { TimeOfDayPicker, POPUP_CLASS_NAME } from '../TimeOfDayPicker';
 import { getBodyStyles } from '../TimeRangePicker/CalendarBody';
 import { isValid } from '../utils';
 
@@ -25,28 +31,69 @@ export interface Props {
   label?: ReactNode;
   /** Set the latest selectable date */
   maxDate?: Date;
+  /** Set the minimum selectable date */
+  minDate?: Date;
+  /** Display seconds on the time picker */
+  showSeconds?: boolean;
+  /** Set the hours that can't be selected */
+  disabledHours?: () => number[];
+  /** Set the minutes that can't be selected */
+  disabledMinutes?: () => number[];
+  /** Set the seconds that can't be selected */
+  disabledSeconds?: () => number[];
 }
 
-export const DateTimePicker = ({ date, maxDate, label, onChange }: Props) => {
+export const DateTimePicker = ({
+  date,
+  maxDate,
+  minDate,
+  label,
+  onChange,
+  disabledHours,
+  disabledMinutes,
+  disabledSeconds,
+  showSeconds = true,
+}: Props) => {
   const [isOpen, setOpen] = useState(false);
 
   const ref = useRef<HTMLDivElement>(null);
   const { overlayProps, underlayProps } = useOverlay(
-    { onClose: () => setOpen(false), isDismissable: true, isOpen },
+    {
+      onClose: () => setOpen(false),
+      isDismissable: true,
+      isOpen,
+      shouldCloseOnInteractOutside: (element) => {
+        const popupElement = document.getElementsByClassName(POPUP_CLASS_NAME)[0];
+        return !(popupElement && popupElement.contains(element));
+      },
+    },
     ref
   );
   const { dialogProps } = useDialog({}, ref);
 
   const theme = useTheme2();
-  const { modalBackdrop } = getModalStyles(theme);
+  const { modalBackdrop } = useStyles2(getModalStyles);
   const isFullscreen = useMedia(`(min-width: ${theme.breakpoints.values.lg}px)`);
   const styles = useStyles2(getStyles);
 
-  const [markerElement, setMarkerElement] = useState<HTMLInputElement | null>();
-  const [selectorElement, setSelectorElement] = useState<HTMLDivElement | null>();
+  // the order of middleware is important!
+  // see https://floating-ui.com/docs/arrow#order
+  const middleware = [
+    flip({
+      // see https://floating-ui.com/docs/flip#combining-with-shift
+      crossAxis: false,
+      boundary: document.body,
+    }),
+    shift(),
+  ];
 
-  const popper = usePopper(markerElement, selectorElement, {
+  const { refs, floatingStyles } = useFloating({
+    open: isOpen,
     placement: 'bottom-start',
+    onOpenChange: setOpen,
+    middleware,
+    whileElementsMounted: autoUpdate,
+    strategy: 'fixed',
   });
 
   const onApply = useCallback(
@@ -73,7 +120,8 @@ export const DateTimePicker = ({ date, maxDate, label, onChange }: Props) => {
         isFullscreen={isFullscreen}
         onOpen={onOpen}
         label={label}
-        ref={setMarkerElement}
+        ref={refs.setReference}
+        showSeconds={showSeconds}
       />
       {isOpen ? (
         isFullscreen ? (
@@ -86,8 +134,13 @@ export const DateTimePicker = ({ date, maxDate, label, onChange }: Props) => {
                   isFullscreen={true}
                   onClose={() => setOpen(false)}
                   maxDate={maxDate}
-                  ref={setSelectorElement}
-                  style={popper.styles.popper}
+                  minDate={minDate}
+                  ref={refs.setFloating}
+                  style={floatingStyles}
+                  showSeconds={showSeconds}
+                  disabledHours={disabledHours}
+                  disabledMinutes={disabledMinutes}
+                  disabledSeconds={disabledSeconds}
                 />
               </div>
             </FocusScope>
@@ -100,9 +153,15 @@ export const DateTimePicker = ({ date, maxDate, label, onChange }: Props) => {
                 <div className={styles.modal}>
                   <DateTimeCalendar
                     date={date}
+                    maxDate={maxDate}
+                    minDate={minDate}
                     onChange={onApply}
                     isFullscreen={false}
                     onClose={() => setOpen(false)}
+                    showSeconds={showSeconds}
+                    disabledHours={disabledHours}
+                    disabledMinutes={disabledMinutes}
+                    disabledSeconds={disabledSeconds}
                   />
                 </div>
               </div>
@@ -120,7 +179,12 @@ interface DateTimeCalendarProps {
   onClose: () => void;
   isFullscreen: boolean;
   maxDate?: Date;
+  minDate?: Date;
   style?: React.CSSProperties;
+  showSeconds?: boolean;
+  disabledHours?: () => number[];
+  disabledMinutes?: () => number[];
+  disabledSeconds?: () => number[];
 }
 
 interface InputProps {
@@ -129,6 +193,7 @@ interface InputProps {
   isFullscreen: boolean;
   onChange: (date: DateTime) => void;
   onOpen: (event: FormEvent<HTMLElement>) => void;
+  showSeconds?: boolean;
 }
 
 type InputState = {
@@ -137,7 +202,8 @@ type InputState = {
 };
 
 const DateTimeInput = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ date, label, onChange, isFullscreen, onOpen }, ref) => {
+  ({ date, label, onChange, onOpen, showSeconds = true }, ref) => {
+    const format = showSeconds ? 'YYYY-MM-DD HH:mm:ss' : 'YYYY-MM-DD HH:mm';
     const [internalDate, setInternalDate] = useState<InputState>(() => {
       return { value: date ? dateTimeFormat(date) : dateTimeFormat(dateTime()), invalid: false };
     });
@@ -145,11 +211,11 @@ const DateTimeInput = React.forwardRef<HTMLInputElement, InputProps>(
     useEffect(() => {
       if (date) {
         setInternalDate({
-          invalid: !isValid(dateTimeFormat(date)),
-          value: isDateTime(date) ? dateTimeFormat(date) : date,
+          invalid: !isValid(dateTimeFormat(date, { format })),
+          value: isDateTime(date) ? dateTimeFormat(date, { format }) : date,
         });
       }
-    }, [date]);
+    }, [date, format]);
 
     const onChangeDate = useCallback((event: FormEvent<HTMLInputElement>) => {
       const isInvalid = !isValid(event.currentTarget.value);
@@ -160,26 +226,27 @@ const DateTimeInput = React.forwardRef<HTMLInputElement, InputProps>(
     }, []);
 
     const onBlur = useCallback(() => {
-      if (isDateTime(internalDate.value)) {
-        onChange(dateTime(internalDate.value));
+      if (!internalDate.invalid) {
+        const date = dateTime(internalDate.value);
+        onChange(date);
       }
-    }, [internalDate.value, onChange]);
+    }, [internalDate, onChange]);
 
     const icon = <Button aria-label="Time picker" icon="calendar-alt" variant="secondary" onClick={onOpen} />;
     return (
       <InlineField
         label={label}
         invalid={!!(internalDate.value && internalDate.invalid)}
-        className={css`
-          margin-bottom: 0;
-        `}
+        className={css({
+          marginBottom: 0,
+        })}
       >
         <Input
           onChange={onChangeDate}
           addonAfter={icon}
           value={internalDate.value}
           onBlur={onBlur}
-          data-testid="date-time-input"
+          data-testid={Components.DateTimePicker.input}
           placeholder="Select date/time"
           ref={ref}
         />
@@ -191,7 +258,22 @@ const DateTimeInput = React.forwardRef<HTMLInputElement, InputProps>(
 DateTimeInput.displayName = 'DateTimeInput';
 
 const DateTimeCalendar = React.forwardRef<HTMLDivElement, DateTimeCalendarProps>(
-  ({ date, onClose, onChange, isFullscreen, maxDate, style }, ref) => {
+  (
+    {
+      date,
+      onClose,
+      onChange,
+      isFullscreen,
+      maxDate,
+      minDate,
+      style,
+      showSeconds = true,
+      disabledHours,
+      disabledMinutes,
+      disabledSeconds,
+    },
+    ref
+  ) => {
     const calendarStyles = useStyles2(getBodyStyles);
     const styles = useStyles2(getStyles);
     const [internalDate, setInternalDate] = useState<Date>(() => {
@@ -202,8 +284,8 @@ const DateTimeCalendar = React.forwardRef<HTMLDivElement, DateTimeCalendarProps>
       return new Date();
     });
 
-    const onChangeDate = useCallback((date: Date | Date[]) => {
-      if (!Array.isArray(date)) {
+    const onChangeDate = useCallback<NonNullable<React.ComponentProps<typeof Calendar>['onChange']>>((date) => {
+      if (date && !Array.isArray(date)) {
         setInternalDate((prevState) => {
           // If we don't use time from prevState
           // the time will be reset to 00:00:00
@@ -235,9 +317,17 @@ const DateTimeCalendar = React.forwardRef<HTMLDivElement, DateTimeCalendarProps>
           className={calendarStyles.body}
           tileClassName={calendarStyles.title}
           maxDate={maxDate}
+          minDate={minDate}
         />
         <div className={styles.time}>
-          <TimeOfDayPicker showSeconds={true} onChange={onChangeTime} value={dateTime(internalDate)} />
+          <TimeOfDayPicker
+            showSeconds={showSeconds}
+            onChange={onChangeTime}
+            value={dateTime(internalDate)}
+            disabledHours={disabledHours}
+            disabledMinutes={disabledMinutes}
+            disabledSeconds={disabledSeconds}
+          />
         </div>
         <HorizontalGroup>
           <Button type="button" onClick={() => onChange(dateTime(internalDate))}>
@@ -255,25 +345,25 @@ const DateTimeCalendar = React.forwardRef<HTMLDivElement, DateTimeCalendarProps>
 DateTimeCalendar.displayName = 'DateTimeCalendar';
 
 const getStyles = (theme: GrafanaTheme2) => ({
-  container: css`
-    padding: ${theme.spacing(1)};
-    border: 1px ${theme.colors.border.weak} solid;
-    border-radius: ${theme.shape.borderRadius(1)};
-    background-color: ${theme.colors.background.primary};
-    z-index: ${theme.zIndex.modal};
-  `,
-  fullScreen: css`
-    position: absolute;
-  `,
-  time: css`
-    margin-bottom: ${theme.spacing(2)};
-  `,
-  modal: css`
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: ${theme.zIndex.modal};
-    max-width: 280px;
-  `,
+  container: css({
+    padding: theme.spacing(1),
+    border: `1px ${theme.colors.border.weak} solid`,
+    borderRadius: theme.shape.radius.default,
+    backgroundColor: theme.colors.background.primary,
+    zIndex: theme.zIndex.modal,
+  }),
+  fullScreen: css({
+    position: 'absolute',
+  }),
+  time: css({
+    marginBottom: theme.spacing(2),
+  }),
+  modal: css({
+    position: 'fixed',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    zIndex: theme.zIndex.modal,
+    maxWidth: '280px',
+  }),
 });

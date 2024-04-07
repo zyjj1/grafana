@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,17 +11,26 @@ import (
 
 	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/infra/localcache"
-	"github.com/grafana/grafana/pkg/models"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	rs "github.com/grafana/grafana/pkg/services/accesscontrol/resourcepermissions"
+	"github.com/grafana/grafana/pkg/services/auth/identity"
+	"github.com/grafana/grafana/pkg/services/dashboards/dashboardaccess"
+	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/services/org/orgimpl"
 	"github.com/grafana/grafana/pkg/services/quota/quotatest"
+	"github.com/grafana/grafana/pkg/services/supportbundles/supportbundlestest"
 	"github.com/grafana/grafana/pkg/services/team"
 	"github.com/grafana/grafana/pkg/services/team/teamimpl"
 	"github.com/grafana/grafana/pkg/services/user"
 	"github.com/grafana/grafana/pkg/services/user/userimpl"
+	"github.com/grafana/grafana/pkg/tests/testsuite"
 )
+
+// run tests with cleanup
+func TestMain(m *testing.M) {
+	testsuite.Run(m)
+}
 
 type getUserPermissionsTestCase struct {
 	desc               string
@@ -31,6 +41,7 @@ type getUserPermissionsTestCase struct {
 	teamPermissions    []string
 	builtinPermissions []string
 	expected           int
+	policyCount        int
 }
 
 func TestAccessControlStore_GetUserPermissions(t *testing.T) {
@@ -43,6 +54,7 @@ func TestAccessControlStore_GetUserPermissions(t *testing.T) {
 			teamPermissions:    []string{"100", "2"},
 			builtinPermissions: []string{"5", "6"},
 			expected:           7,
+			policyCount:        7,
 		},
 		{
 			desc:               "Should not get admin roles",
@@ -52,6 +64,7 @@ func TestAccessControlStore_GetUserPermissions(t *testing.T) {
 			teamPermissions:    []string{"100", "2"},
 			builtinPermissions: []string{"5", "6"},
 			expected:           5,
+			policyCount:        7,
 		},
 		{
 			desc:               "Should work without org role",
@@ -61,6 +74,7 @@ func TestAccessControlStore_GetUserPermissions(t *testing.T) {
 			teamPermissions:    []string{"100", "2"},
 			builtinPermissions: []string{"5", "6"},
 			expected:           5,
+			policyCount:        7,
 		},
 		{
 			desc:               "should only get br permissions for anonymous user",
@@ -71,6 +85,7 @@ func TestAccessControlStore_GetUserPermissions(t *testing.T) {
 			teamPermissions:    []string{"100", "2"},
 			builtinPermissions: []string{"5", "6"},
 			expected:           2,
+			policyCount:        7,
 		},
 	}
 	for _, tt := range tests {
@@ -89,7 +104,7 @@ func TestAccessControlStore_GetUserPermissions(t *testing.T) {
 			}
 
 			for _, id := range tt.teamPermissions {
-				_, err := permissionStore.SetTeamResourcePermission(context.Background(), tt.orgID, team.Id, rs.SetResourcePermissionCommand{
+				_, err := permissionStore.SetTeamResourcePermission(context.Background(), tt.orgID, team.ID, rs.SetResourcePermissionCommand{
 					Actions:    []string{"dashboards:read"},
 					Resource:   "dashboards",
 					ResourceID: id,
@@ -117,7 +132,7 @@ func TestAccessControlStore_GetUserPermissions(t *testing.T) {
 			}
 
 			userID := user.ID
-			teamIDs := []int64{team.Id}
+			teamIDs := []int64{team.ID}
 			if tt.anonymousUser {
 				userID = 0
 				teamIDs = []int64{}
@@ -131,6 +146,17 @@ func TestAccessControlStore_GetUserPermissions(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Len(t, permissions, tt.expected)
+
+			policies, err := GetAccessPolicies(context.Background(), user.OrgID, store.sql.GetSqlxSession(),
+				func(ctx context.Context, orgID int64, scope string) ([]string, error) {
+					return strings.Split(scope, ":"), nil
+				})
+			require.NoError(t, err)
+			assert.Len(t, policies, tt.policyCount)
+
+			for idx, p := range policies {
+				fmt.Printf("POLICIES[%d] %+v\n", idx, p.Spec)
+			}
 		})
 	}
 }
@@ -217,7 +243,78 @@ func TestAccessControlStore_DeleteUserPermissions(t *testing.T) {
 	})
 }
 
-func createUserAndTeam(t *testing.T, userSrv user.Service, teamSvc team.Service, orgID int64) (*user.User, models.Team) {
+func TestAccessControlStore_DeleteTeamPermissions(t *testing.T) {
+	t.Run("expect permissions related to team to be deleted", func(t *testing.T) {
+		store, permissionsStore, sql, teamSvc, _ := setupTestEnv(t)
+		user, team := createUserAndTeam(t, sql, teamSvc, 1)
+
+		// grant permission to the team
+		_, err := permissionsStore.SetTeamResourcePermission(context.Background(), 1, team.ID, rs.SetResourcePermissionCommand{
+			Actions:           []string{"dashboards:write"},
+			Resource:          "dashboards",
+			ResourceAttribute: "uid",
+			ResourceID:        "xxYYzz",
+		}, nil)
+		require.NoError(t, err)
+
+		// generate permissions scoped to the team
+		_, err = permissionsStore.SetUserResourcePermission(context.Background(), 1, accesscontrol.User{ID: user.ID}, rs.SetResourcePermissionCommand{
+			Actions:           []string{"team:read"},
+			Resource:          "teams",
+			ResourceAttribute: "id",
+			ResourceID:        fmt.Sprintf("%d", team.ID),
+		}, nil)
+		require.NoError(t, err)
+
+		err = store.DeleteTeamPermissions(context.Background(), 1, team.ID)
+		require.NoError(t, err)
+
+		permissions, err := store.GetUserPermissions(context.Background(), accesscontrol.GetUserPermissionsQuery{
+			OrgID:   1,
+			UserID:  user.ID,
+			Roles:   []string{"Admin"},
+			TeamIDs: []int64{team.ID},
+		})
+		require.NoError(t, err)
+		assert.Len(t, permissions, 0)
+	})
+	t.Run("expect permissions not related to team to be kept", func(t *testing.T) {
+		store, permissionsStore, sql, teamSvc, _ := setupTestEnv(t)
+		user, team := createUserAndTeam(t, sql, teamSvc, 1)
+
+		// grant permission to the team
+		_, err := permissionsStore.SetTeamResourcePermission(context.Background(), 1, team.ID, rs.SetResourcePermissionCommand{
+			Actions:           []string{"dashboards:write"},
+			Resource:          "dashboards",
+			ResourceAttribute: "uid",
+			ResourceID:        "xxYYzz",
+		}, nil)
+		require.NoError(t, err)
+
+		// generate permissions scoped to another team
+		_, err = permissionsStore.SetUserResourcePermission(context.Background(), 1, accesscontrol.User{ID: user.ID}, rs.SetResourcePermissionCommand{
+			Actions:           []string{"team:read"},
+			Resource:          "teams",
+			ResourceAttribute: "id",
+			ResourceID:        fmt.Sprintf("%d", team.ID+1),
+		}, nil)
+		require.NoError(t, err)
+
+		err = store.DeleteTeamPermissions(context.Background(), 1, team.ID)
+		require.NoError(t, err)
+
+		permissions, err := store.GetUserPermissions(context.Background(), accesscontrol.GetUserPermissionsQuery{
+			OrgID:   1,
+			UserID:  user.ID,
+			Roles:   []string{"Admin"},
+			TeamIDs: []int64{team.ID},
+		})
+		require.NoError(t, err)
+		assert.Len(t, permissions, 1)
+	})
+}
+
+func createUserAndTeam(t *testing.T, userSrv user.Service, teamSvc team.Service, orgID int64) (*user.User, team.Team) {
 	t.Helper()
 
 	user, err := userSrv.Create(context.Background(), &user.CreateUserCommand{
@@ -229,7 +326,7 @@ func createUserAndTeam(t *testing.T, userSrv user.Service, teamSvc team.Service,
 	team, err := teamSvc.CreateTeam("team", "", orgID)
 	require.NoError(t, err)
 
-	err = teamSvc.AddTeamMember(user.ID, orgID, team.Id, false, models.PERMISSION_VIEW)
+	err = teamSvc.AddTeamMember(context.Background(), user.ID, orgID, team.ID, false, dashboardaccess.PERMISSION_VIEW)
 	require.NoError(t, err)
 
 	return user, team
@@ -262,6 +359,7 @@ func createUsersAndTeams(t *testing.T, svcs helperServices, orgID int64, users [
 			IsAdmin: users[i].isAdmin,
 		})
 		require.NoError(t, err)
+		require.Equal(t, orgID, user.OrgID)
 
 		// User is not member of the org
 		if users[i].orgRole == "" {
@@ -276,14 +374,14 @@ func createUsersAndTeams(t *testing.T, svcs helperServices, orgID int64, users [
 		team, err := svcs.teamSvc.CreateTeam(fmt.Sprintf("team%v", i+1), "", orgID)
 		require.NoError(t, err)
 
-		err = svcs.teamSvc.AddTeamMember(user.ID, orgID, team.Id, false, models.PERMISSION_VIEW)
+		err = svcs.teamSvc.AddTeamMember(context.Background(), user.ID, orgID, team.ID, false, dashboardaccess.PERMISSION_VIEW)
 		require.NoError(t, err)
 
 		err = svcs.orgSvc.UpdateOrgUser(context.Background(),
 			&org.UpdateOrgUserCommand{Role: users[i].orgRole, OrgID: orgID, UserID: user.ID})
 		require.NoError(t, err)
 
-		res = append(res, dbUser{userID: user.ID, teamID: team.Id})
+		res = append(res, dbUser{userID: user.ID, teamID: team.ID})
 	}
 
 	return res
@@ -291,12 +389,21 @@ func createUsersAndTeams(t *testing.T, svcs helperServices, orgID int64, users [
 
 func setupTestEnv(t testing.TB) (*AccessControlStore, rs.Store, user.Service, team.Service, org.Service) {
 	sql, cfg := db.InitTestDBwithCfg(t)
+	cfg.AutoAssignOrg = true
+	cfg.AutoAssignOrgRole = "Viewer"
+	cfg.AutoAssignOrgId = 1
 	acstore := ProvideService(sql)
-	permissionStore := rs.NewStore(sql)
-	teamService := teamimpl.ProvideService(sql, cfg)
+	permissionStore := rs.NewStore(sql, featuremgmt.WithFeatures())
+	teamService, err := teamimpl.ProvideService(sql, cfg)
+	require.NoError(t, err)
 	orgService, err := orgimpl.ProvideService(sql, cfg, quotatest.New(false, nil))
 	require.NoError(t, err)
-	userService, err := userimpl.ProvideService(sql, orgService, cfg, teamService, localcache.ProvideService(), quotatest.New(false, nil))
+
+	orgID, err := orgService.GetOrCreate(context.Background(), "test")
+	require.Equal(t, int64(1), orgID)
+	require.NoError(t, err)
+
+	userService, err := userimpl.ProvideService(sql, orgService, cfg, teamService, localcache.ProvideService(), quotatest.New(false, nil), supportbundlestest.NewFakeBundleService())
 	require.NoError(t, err)
 	return acstore, permissionStore, userService, teamService, orgService
 }
@@ -433,7 +540,7 @@ func TestIntegrationAccessControlStore_SearchUsersPermissions(t *testing.T) {
 			},
 			options: accesscontrol.SearchOptions{
 				ActionPrefix: "teams:",
-				UserID:       1,
+				NamespacedID: identity.NamespaceUser + ":1",
 			},
 			wantPerm: map[int64][]accesscontrol.Permission{
 				1: {{Action: "teams:read", Scope: "teams:id:1"}, {Action: "teams:read", Scope: "teams:id:10"},
@@ -499,6 +606,20 @@ func TestIntegrationAccessControlStore_SearchUsersPermissions(t *testing.T) {
 			}},
 		},
 		{
+			name:  "user assignment by scope",
+			users: []testUser{{orgRole: org.RoleAdmin, isAdmin: false}},
+			permCmds: []rs.SetResourcePermissionsCommand{
+				{User: accesscontrol.User{ID: 1, IsExternal: false}, SetResourcePermissionCommand: readTeamPerm("*")}, // hack to have a global permission
+				{User: accesscontrol.User{ID: 1, IsExternal: false}, SetResourcePermissionCommand: writeTeamPerm("1")},
+			},
+			options: accesscontrol.SearchOptions{Scope: "teams:id:1"},
+			wantPerm: map[int64][]accesscontrol.Permission{1: {
+				{Action: "teams:read", Scope: "teams:id:*"},
+				{Action: "teams:read", Scope: "teams:id:1"},
+				{Action: "teams:write", Scope: "teams:id:1"},
+			}},
+		},
+		{
 			name:  "user assignment by action and scope",
 			users: []testUser{{orgRole: org.RoleAdmin, isAdmin: false}},
 			permCmds: []rs.SetResourcePermissionsCommand{
@@ -507,6 +628,24 @@ func TestIntegrationAccessControlStore_SearchUsersPermissions(t *testing.T) {
 			},
 			options:  accesscontrol.SearchOptions{Action: "teams:read", Scope: "teams:id:1"},
 			wantPerm: map[int64][]accesscontrol.Permission{1: {{Action: "teams:read", Scope: "teams:id:1"}}},
+		},
+		{
+			name:  "user assignment by role prefixes",
+			users: []testUser{{orgRole: org.RoleAdmin, isAdmin: false}},
+			permCmds: []rs.SetResourcePermissionsCommand{
+				{User: accesscontrol.User{ID: 1, IsExternal: false}, SetResourcePermissionCommand: readTeamPerm("1")},
+			},
+			options:  accesscontrol.SearchOptions{RolePrefixes: []string{accesscontrol.ManagedRolePrefix}},
+			wantPerm: map[int64][]accesscontrol.Permission{1: {{Action: "teams:read", Scope: "teams:id:1"}}},
+		},
+		{
+			name:  "filter out permissions by role prefix",
+			users: []testUser{{orgRole: org.RoleAdmin, isAdmin: false}},
+			permCmds: []rs.SetResourcePermissionsCommand{
+				{User: accesscontrol.User{ID: 1, IsExternal: false}, SetResourcePermissionCommand: readTeamPerm("1")},
+			},
+			options:  accesscontrol.SearchOptions{RolePrefixes: []string{accesscontrol.BasicRolePrefix}},
+			wantPerm: map[int64][]accesscontrol.Permission{},
 		},
 	}
 	for _, tt := range tests {

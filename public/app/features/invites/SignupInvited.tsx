@@ -1,8 +1,9 @@
-import React, { FC, useState } from 'react';
+import React, { useState } from 'react';
 import { useAsync } from 'react-use';
 
 import { getBackendSrv } from '@grafana/runtime';
-import { Button, Field, Form, Input } from '@grafana/ui';
+import { Button, Field, Input } from '@grafana/ui';
+import { Form } from 'app/core/components/Form/Form';
 import { Page } from 'app/core/components/Page/Page';
 import { getConfig } from 'app/core/config';
 import { contextSrv } from 'app/core/core';
@@ -31,7 +32,7 @@ const navModel = {
 
 export interface Props extends GrafanaRouteComponentProps<{ code: string }> {}
 
-export const SignupInvitedPage: FC<Props> = ({ match }) => {
+export const SignupInvitedPage = ({ match }: Props) => {
   const code = match.params.code;
   const [initFormModel, setInitFormModel] = useState<FormModel>();
   const [greeting, setGreeting] = useState<string>();

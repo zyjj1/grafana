@@ -1,23 +1,22 @@
 ---
-description: Manage alert notifications
+canonical: https://grafana.com/docs/grafana/latest/alerting/manage-notifications/
+description: Detect and respond for day-to-day triage and analysis of what’s going on and action you need to take
 keywords:
   - grafana
-  - alert
-  - notifications
-title: Manage your alert notifications
-weight: 160
+  - detect
+  - respond
+labels:
+  products:
+    - cloud
+    - enterprise
+    - oss
+menuTitle: Detect and respond
+title: Detect and respond
+weight: 130
 ---
 
-# Manage your alert notifications
+# Detect and respond
 
-Choosing how, when, and where to send your alert notifications is an important part of setting up your alerting system. These decisions will have a direct impact on your ability to resolve issues quickly and not miss anything important.
+Use Grafana Alerting to track and generate alerts and send notifications, providing an efficient way for engineers to monitor, respond, and triage issues within their services.
 
-As a first step, define your contact points; where to send your alert notifications to. A contact point can be a set of destinations for matching notifications. Add message templates to contact points for reuse and consistent messaging in your notifications.
-
-Next, create a notification policy which is a set of rules for where, when and how your alerts are routed to contact points. In a notification policy, you define where to send your alert notifications by choosing one of the contact points you created.Add mute timings to your notification policy. A mute timing is a recurring interval of time during which you don’t want any notifications to be sent out.
-
-You can also add silences to stop notifications from one or more alert rules. The difference between a silence and a mute timing is that a silence only lasts for only a specified window of time.
-
-When an alert rule fires, the alert ruler sends alert instances to the Alertmanager; one alert rule can trigger multiple individual alert instances.
-
-The Alertmanager receives these alert instances and then handles silences, groups alerts, and sends notifications to your contact points as defined in the notification policy.
+Alerts and alert notifications provide a lot of value as key indicators to issues during the triage process, providing engineers with the information they need to understand what is going on in their system or service.

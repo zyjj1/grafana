@@ -7,7 +7,6 @@ package xorm
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"hash/crc32"
 	"reflect"
@@ -33,13 +32,13 @@ type Session struct {
 	autoResetStatement bool
 
 	// !nashtsai! storing these beans due to yet committed tx
-	afterInsertBeans map[interface{}]*[]func(interface{})
-	afterUpdateBeans map[interface{}]*[]func(interface{})
-	afterDeleteBeans map[interface{}]*[]func(interface{})
+	afterInsertBeans map[any]*[]func(any)
+	afterUpdateBeans map[any]*[]func(any)
+	afterDeleteBeans map[any]*[]func(any)
 	// --
 
-	beforeClosures []func(interface{})
-	afterClosures  []func(interface{})
+	beforeClosures []func(any)
+	afterClosures  []func(any)
 
 	afterProcessors []executedProcessor
 
@@ -48,7 +47,7 @@ type Session struct {
 
 	// !evalphobia! stored the last executed query on this session
 	lastSQL     string
-	lastSQLArgs []interface{}
+	lastSQLArgs []any
 	showSQL     bool
 
 	ctx context.Context
@@ -66,17 +65,17 @@ func (session *Session) Init() {
 	session.prepareStmt = false
 
 	// !nashtsai! is lazy init better?
-	session.afterInsertBeans = make(map[interface{}]*[]func(interface{}), 0)
-	session.afterUpdateBeans = make(map[interface{}]*[]func(interface{}), 0)
-	session.afterDeleteBeans = make(map[interface{}]*[]func(interface{}), 0)
-	session.beforeClosures = make([]func(interface{}), 0)
-	session.afterClosures = make([]func(interface{}), 0)
+	session.afterInsertBeans = make(map[any]*[]func(any), 0)
+	session.afterUpdateBeans = make(map[any]*[]func(any), 0)
+	session.afterDeleteBeans = make(map[any]*[]func(any), 0)
+	session.beforeClosures = make([]func(any), 0)
+	session.afterClosures = make([]func(any), 0)
 	session.stmtCache = make(map[uint32]*core.Stmt)
 
 	session.afterProcessors = make([]executedProcessor, 0)
 
 	session.lastSQL = ""
-	session.lastSQLArgs = []interface{}{}
+	session.lastSQLArgs = []any{}
 
 	session.ctx = session.engine.defaultContext
 }
@@ -117,7 +116,7 @@ func (session *Session) Prepare() *Session {
 }
 
 // Before Apply before Processor, affected bean is passed to closure arg
-func (session *Session) Before(closures func(interface{})) *Session {
+func (session *Session) Before(closures func(any)) *Session {
 	if closures != nil {
 		session.beforeClosures = append(session.beforeClosures, closures)
 	}
@@ -125,7 +124,7 @@ func (session *Session) Before(closures func(interface{})) *Session {
 }
 
 // After Apply after Processor, affected bean is passed to closure arg
-func (session *Session) After(closures func(interface{})) *Session {
+func (session *Session) After(closures func(any)) *Session {
 	if closures != nil {
 		session.afterClosures = append(session.afterClosures, closures)
 	}
@@ -133,7 +132,7 @@ func (session *Session) After(closures func(interface{})) *Session {
 }
 
 // Table can input a string or pointer to struct for special a table to operate.
-func (session *Session) Table(tableNameOrBean interface{}) *Session {
+func (session *Session) Table(tableNameOrBean any) *Session {
 	session.statement.Table(tableNameOrBean)
 	return session
 }
@@ -141,12 +140,6 @@ func (session *Session) Table(tableNameOrBean interface{}) *Session {
 // Alias set the table alias
 func (session *Session) Alias(alias string) *Session {
 	session.statement.Alias(alias)
-	return session
-}
-
-// NoCascade indicate that no cascade load child object
-func (session *Session) NoCascade() *Session {
-	session.statement.UseCascade = false
 	return session
 }
 
@@ -199,14 +192,6 @@ func (session *Session) Charset(charset string) *Session {
 	return session
 }
 
-// Cascade indicates if loading sub Struct
-func (session *Session) Cascade(trueOrFalse ...bool) *Session {
-	if len(trueOrFalse) >= 1 {
-		session.statement.UseCascade = trueOrFalse[0]
-	}
-	return session
-}
-
 // MustLogSQL means record SQL or not and don't follow engine's setting
 func (session *Session) MustLogSQL(log ...bool) *Session {
 	if len(log) > 0 {
@@ -225,7 +210,7 @@ func (session *Session) NoCache() *Session {
 }
 
 // Join join_operator should be one of INNER, LEFT OUTER, CROSS etc - this will be prepended to JOIN
-func (session *Session) Join(joinOperator string, tablename interface{}, condition string, args ...interface{}) *Session {
+func (session *Session) Join(joinOperator string, tablename any, condition string, args ...any) *Session {
 	session.statement.Join(joinOperator, tablename, condition, args...)
 	return session
 }
@@ -251,9 +236,9 @@ func (session *Session) DB() *core.DB {
 	return session.db
 }
 
-func cleanupProcessorsClosures(slices *[]func(interface{})) {
+func cleanupProcessorsClosures(slices *[]func(any)) {
 	if len(*slices) > 0 {
-		*slices = make([]func(interface{}), 0)
+		*slices = make([]func(any), 0)
 	}
 }
 
@@ -291,7 +276,7 @@ func (session *Session) getField(dataStruct *reflect.Value, key string, table *c
 }
 
 // Cell cell is a result of one column field
-type Cell *interface{}
+type Cell *any
 
 func (session *Session) rows2Beans(rows *core.Rows, fields []string,
 	table *core.Table, newElemFunc func([]string) reflect.Value,
@@ -311,7 +296,7 @@ func (session *Session) rows2Beans(rows *core.Rows, fields []string,
 			return err
 		}
 		session.afterProcessors = append(session.afterProcessors, executedProcessor{
-			fun: func(*Session, interface{}) error {
+			fun: func(*Session, any) error {
 				return sliceValueSetFunc(&newValue, pk)
 			},
 			session: session,
@@ -321,14 +306,14 @@ func (session *Session) rows2Beans(rows *core.Rows, fields []string,
 	return rows.Err()
 }
 
-func (session *Session) row2Slice(rows *core.Rows, fields []string, bean interface{}) ([]interface{}, error) {
+func (session *Session) row2Slice(rows *core.Rows, fields []string, bean any) ([]any, error) {
 	for _, closure := range session.beforeClosures {
 		closure(bean)
 	}
 
-	scanResults := make([]interface{}, len(fields))
+	scanResults := make([]any, len(fields))
 	for i := 0; i < len(fields); i++ {
-		var cell interface{}
+		var cell any
 		scanResults[i] = &cell
 	}
 	if err := rows.Scan(scanResults...); err != nil {
@@ -337,17 +322,17 @@ func (session *Session) row2Slice(rows *core.Rows, fields []string, bean interfa
 
 	if b, hasBeforeSet := bean.(BeforeSetProcessor); hasBeforeSet {
 		for ii, key := range fields {
-			b.BeforeSet(key, Cell(scanResults[ii].(*interface{})))
+			b.BeforeSet(key, Cell(scanResults[ii].(*any)))
 		}
 	}
 	return scanResults, nil
 }
 
-func (session *Session) slice2Bean(scanResults []interface{}, fields []string, bean interface{}, dataStruct *reflect.Value, table *core.Table) (core.PK, error) {
+func (session *Session) slice2Bean(scanResults []any, fields []string, bean any, dataStruct *reflect.Value, table *core.Table) (core.PK, error) {
 	defer func() {
 		if b, hasAfterSet := bean.(AfterSetProcessor); hasAfterSet {
 			for ii, key := range fields {
-				b.AfterSet(key, Cell(scanResults[ii].(*interface{})))
+				b.AfterSet(key, Cell(scanResults[ii].(*any)))
 			}
 		}
 	}()
@@ -355,7 +340,7 @@ func (session *Session) slice2Bean(scanResults []interface{}, fields []string, b
 	// handle afterClosures
 	for _, closure := range session.afterClosures {
 		session.afterProcessors = append(session.afterProcessors, executedProcessor{
-			fun: func(sess *Session, bean interface{}) error {
+			fun: func(sess *Session, bean any) error {
 				closure(bean)
 				return nil
 			},
@@ -366,7 +351,7 @@ func (session *Session) slice2Bean(scanResults []interface{}, fields []string, b
 
 	if a, has := bean.(AfterLoadProcessor); has {
 		session.afterProcessors = append(session.afterProcessors, executedProcessor{
-			fun: func(sess *Session, bean interface{}) error {
+			fun: func(sess *Session, bean any) error {
 				a.AfterLoad()
 				return nil
 			},
@@ -377,7 +362,7 @@ func (session *Session) slice2Bean(scanResults []interface{}, fields []string, b
 
 	if a, has := bean.(AfterLoadSessionProcessor); has {
 		session.afterProcessors = append(session.afterProcessors, executedProcessor{
-			fun: func(sess *Session, bean interface{}) error {
+			fun: func(sess *Session, bean any) error {
 				a.AfterLoad(sess)
 				return nil
 			},
@@ -652,37 +637,6 @@ func (session *Session) slice2Bean(scanResults []interface{}, fields []string, b
 						fieldValue.Set(x.Elem())
 					}
 				}
-			} else if session.statement.UseCascade {
-				table, err := session.engine.autoMapType(*fieldValue)
-				if err != nil {
-					return nil, err
-				}
-
-				hasAssigned = true
-				if len(table.PrimaryKeys) != 1 {
-					return nil, errors.New("unsupported non or composited primary key cascade")
-				}
-				var pk = make(core.PK, len(table.PrimaryKeys))
-				pk[0], err = asKind(vv, rawValueType)
-				if err != nil {
-					return nil, err
-				}
-
-				if !isPKZero(pk) {
-					// !nashtsai! TODO for hasOne relationship, it's preferred to use join query for eager fetch
-					// however, also need to consider adding a 'lazy' attribute to xorm tag which allow hasOne
-					// property to be fetched lazily
-					structInter := reflect.New(fieldValue.Type())
-					has, err := session.ID(pk).NoCascade().get(structInter.Interface())
-					if err != nil {
-						return nil, err
-					}
-					if has {
-						fieldValue.Set(structInter.Elem())
-					} else {
-						return nil, errors.New("cascade obj is not exist")
-					}
-				}
 			}
 		case reflect.Ptr:
 			// !nashtsai! TODO merge duplicated codes above
@@ -817,13 +771,13 @@ func (session *Session) slice2Bean(scanResults []interface{}, fields []string, b
 }
 
 // saveLastSQL stores executed query information
-func (session *Session) saveLastSQL(sql string, args ...interface{}) {
+func (session *Session) saveLastSQL(sql string, args ...any) {
 	session.lastSQL = sql
 	session.lastSQLArgs = args
 	session.logSQL(sql, args...)
 }
 
-func (session *Session) logSQL(sqlStr string, sqlArgs ...interface{}) {
+func (session *Session) logSQL(sqlStr string, sqlArgs ...any) {
 	if session.showSQL && !session.engine.showExecTime {
 		if len(sqlArgs) > 0 {
 			session.engine.logger.Infof("[SQL] %v %#v", sqlStr, sqlArgs)
@@ -834,7 +788,7 @@ func (session *Session) logSQL(sqlStr string, sqlArgs ...interface{}) {
 }
 
 // LastSQL returns last query information
-func (session *Session) LastSQL() (string, []interface{}) {
+func (session *Session) LastSQL() (string, []any) {
 	return session.lastSQL, session.lastSQLArgs
 }
 

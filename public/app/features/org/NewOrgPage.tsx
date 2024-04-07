@@ -1,8 +1,9 @@
-import React, { FC } from 'react';
+import React from 'react';
 import { connect, ConnectedProps } from 'react-redux';
 
 import { NavModelItem } from '@grafana/data';
-import { Button, Input, Field, Form, FieldSet } from '@grafana/ui';
+import { Button, Input, Field, FieldSet } from '@grafana/ui';
+import { Form } from 'app/core/components/Form/Form';
 import { Page } from 'app/core/components/Page/Page';
 import { getConfig } from 'app/core/config';
 
@@ -24,10 +25,9 @@ const pageNav: NavModelItem = {
   icon: 'building',
   id: 'org-new',
   text: 'New organization',
-  breadcrumbs: [{ title: 'Server admin', url: 'admin/orgs' }],
 };
 
-export const NewOrgPage: FC<Props> = ({ createOrganization }) => {
+export const NewOrgPage = ({ createOrganization }: Props) => {
   const createOrg = async (newOrg: { name: string }) => {
     await createOrganization(newOrg);
     window.location.href = getConfig().appSubUrl + '/org';

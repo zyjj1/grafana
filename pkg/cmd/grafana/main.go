@@ -5,14 +5,17 @@ import (
 	"os"
 
 	"github.com/fatih/color"
+	"github.com/urfave/cli/v2"
+
 	gcli "github.com/grafana/grafana/pkg/cmd/grafana-cli/commands"
 	gsrv "github.com/grafana/grafana/pkg/cmd/grafana-server/commands"
-	"github.com/urfave/cli/v2"
+	"github.com/grafana/grafana/pkg/cmd/grafana/apiserver"
 )
 
 // The following variables cannot be constants, since they can be overridden through the -X link flag
 var version = "9.2.0"
-var commit = "NA"
+var commit = gcli.DefaultCommitValue
+var enterpriseCommit = gcli.DefaultCommitValue
 var buildBranch = "main"
 var buildstamp string
 
@@ -29,7 +32,27 @@ func main() {
 		Version: version,
 		Commands: []*cli.Command{
 			gcli.CLICommand(version),
-			gsrv.ServerCommand(version, commit, buildBranch, buildstamp),
+			gsrv.ServerCommand(version, commit, enterpriseCommit, buildBranch, buildstamp),
+			{
+				// The kubernetes standalone apiserver service runner
+				Name:  "apiserver",
+				Usage: "run a standalone api service (experimental)",
+				// Skip parsing flags because the command line is actually managed by cobra
+				SkipFlagParsing: true,
+				Action: func(context *cli.Context) error {
+					// exit here because apiserver handles its own error output
+					os.Exit(apiserver.RunCLI(gsrv.ServerOptions{
+						Version:          version,
+						Commit:           commit,
+						EnterpriseCommit: enterpriseCommit,
+						BuildBranch:      buildBranch,
+						BuildStamp:       buildstamp,
+						Context:          context,
+					}))
+					return nil
+				},
+			},
+			gsrv.ServerCommand(version, commit, enterpriseCommit, buildBranch, buildstamp),
 		},
 		CommandNotFound:      cmdNotFound,
 		EnableBashCompletion: true,

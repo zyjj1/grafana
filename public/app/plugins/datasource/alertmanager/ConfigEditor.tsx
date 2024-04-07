@@ -1,9 +1,10 @@
-import produce from 'immer';
-import React from 'react';
+import { produce } from 'immer';
+import React, { useEffect } from 'react';
+import { Link } from 'react-router-dom';
 
 import { SIGV4ConnectionConfig } from '@grafana/aws-sdk';
 import { DataSourcePluginOptionsEditorProps, SelectableValue } from '@grafana/data';
-import { DataSourceHttpSettings, InlineField, InlineFormLabel, InlineSwitch, Select } from '@grafana/ui';
+import { DataSourceHttpSettings, InlineField, InlineFormLabel, InlineSwitch, Select, Text } from '@grafana/ui';
 import { config } from 'app/core/config';
 
 import { AlertManagerDataSourceJsonData, AlertManagerImplementation } from './types';
@@ -31,6 +32,17 @@ const IMPL_OPTIONS: Array<SelectableValue<AlertManagerImplementation>> = [
 
 export const ConfigEditor = (props: Props) => {
   const { options, onOptionsChange } = props;
+
+  // As we default to Mimir, we need to make sure the implementation is set from the start
+  useEffect(() => {
+    if (!options.jsonData.implementation) {
+      onOptionsChange(
+        produce(options, (draft) => {
+          draft.jsonData.implementation = AlertManagerImplementation.mimir;
+        })
+      );
+    }
+  }, [options, onOptionsChange]);
 
   return (
     <>
@@ -73,6 +85,11 @@ export const ConfigEditor = (props: Props) => {
             />
           </InlineField>
         </div>
+        {options.jsonData.handleGrafanaManagedAlerts && (
+          <Text variant="bodySmall" color="secondary">
+            Make sure to enable the alert forwarding on the <Link to="/alerting/admin">admin page</Link>.
+          </Text>
+        )}
       </div>
       <DataSourceHttpSettings
         defaultUrl={''}
@@ -81,6 +98,7 @@ export const ConfigEditor = (props: Props) => {
         onChange={onOptionsChange}
         sigV4AuthToggleEnabled={config.sigV4AuthEnabled}
         renderSigV4Editor={<SIGV4ConnectionConfig {...props}></SIGV4ConnectionConfig>}
+        secureSocksDSProxyEnabled={false} // the proxy is not implemented to work with the alertmanager
       />
     </>
   );

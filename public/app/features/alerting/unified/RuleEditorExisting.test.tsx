@@ -1,17 +1,13 @@
-import { render, waitFor, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
-import { Provider } from 'react-redux';
-import { Route, Router } from 'react-router-dom';
+import { Route } from 'react-router-dom';
+import { TestProvider } from 'test/helpers/TestProvider';
 import { ui } from 'test/helpers/alertingRuleEditor';
-import { clickSelectOptionMatch } from 'test/helpers/selectOptionInTest';
-import { byRole } from 'testing-library-selector';
 
 import { locationService, setDataSourceSrv } from '@grafana/runtime';
-import { ADD_NEW_FOLER_OPTION } from 'app/core/components/Select/FolderPicker';
 import { contextSrv } from 'app/core/services/context_srv';
-import { DashboardSearchHit } from 'app/features/search/types';
-import { configureStore } from 'app/store/configureStore';
+import { DashboardSearchHit, DashboardSearchItemType } from 'app/features/search/types';
 import { GrafanaAlertStateDecision } from 'app/types/unified-alerting-dto';
 
 import { searchFolders } from '../../../../app/features/manage-dashboards/state/actions';
@@ -22,7 +18,7 @@ import RuleEditor from './RuleEditor';
 import { discoverFeatures } from './api/buildInfo';
 import { fetchRulerRules, fetchRulerRulesGroup, fetchRulerRulesNamespace, setRulerRuleGroup } from './api/ruler';
 import { ExpressionEditorProps } from './components/rule-editor/ExpressionEditor';
-import { disableRBAC, mockDataSource, MockDataSourceSrv, mockFolder } from './mocks';
+import { grantUserPermissions, mockDataSource, MockDataSourceSrv, mockFolder } from './mocks';
 import { fetchRulerRulesIfNotFetchedYet } from './state/actions';
 import * as config from './utils/config';
 import { GRAFANA_RULES_SOURCE_NAME } from './utils/datasource';
@@ -33,6 +29,10 @@ jest.mock('./components/rule-editor/ExpressionEditor', () => ({
   ExpressionEditor: ({ value, onChange }: ExpressionEditorProps) => (
     <input value={value} data-testid="expr" onChange={(e) => onChange(e.target.value)} />
   ),
+}));
+
+jest.mock('app/core/components/AppChrome/AppChromeUpdate', () => ({
+  AppChromeUpdate: ({ actions }: { actions: React.ReactNode }) => <div>{actions}</div>,
 }));
 
 jest.mock('./api/buildInfo');
@@ -64,16 +64,12 @@ const mocks = {
 };
 
 function renderRuleEditor(identifier?: string) {
-  const store = configureStore();
-
   locationService.push(identifier ? `/alerting/${identifier}/edit` : `/alerting/new`);
 
   return render(
-    <Provider store={store}>
-      <Router history={locationService.getHistory()}>
-        <Route path={['/alerting/new', '/alerting/:id/edit']} component={RuleEditor} />
-      </Router>
-    </Provider>
+    <TestProvider>
+      <Route path={['/alerting/new', '/alerting/:id/edit']} component={RuleEditor} />
+    </TestProvider>
   );
 }
 
@@ -83,9 +79,21 @@ describe('RuleEditor grafana managed rules', () => {
     jest.clearAllMocks();
     contextSrv.isEditor = true;
     contextSrv.hasEditPermissionInFolders = true;
-  });
 
-  disableRBAC();
+    grantUserPermissions([
+      AccessControlAction.AlertingRuleRead,
+      AccessControlAction.AlertingRuleUpdate,
+      AccessControlAction.AlertingRuleDelete,
+      AccessControlAction.AlertingRuleCreate,
+      AccessControlAction.DataSourcesRead,
+      AccessControlAction.DataSourcesWrite,
+      AccessControlAction.DataSourcesCreate,
+      AccessControlAction.FoldersWrite,
+      AccessControlAction.FoldersRead,
+      AccessControlAction.AlertingRuleExternalRead,
+      AccessControlAction.AlertingRuleExternalWrite,
+    ]);
+  });
 
   it('can edit grafana managed rule', async () => {
     const uid = 'FOOBAR123';
@@ -93,6 +101,7 @@ describe('RuleEditor grafana managed rules', () => {
       title: 'Folder A',
       uid: 'abcd',
       id: 1,
+      type: DashboardSearchItemType.DashDB,
     };
 
     const slashedFolder = {
@@ -128,16 +137,15 @@ describe('RuleEditor grafana managed rules', () => {
       [folder.title]: [
         {
           interval: '1m',
-          name: 'my great new rule',
+          name: 'group1',
           rules: [
             {
               annotations: { description: 'some description', summary: 'some summary' },
               labels: { severity: 'warn', team: 'the a-team' },
-              for: '5m',
+              for: '1m',
               grafana_alert: {
                 uid,
                 namespace_uid: 'abcd',
-                namespace_id: 1,
                 condition: 'B',
                 data: getDefaultQueries(),
                 exec_err_state: GrafanaAlertStateDecision.Error,
@@ -158,8 +166,8 @@ describe('RuleEditor grafana managed rules', () => {
     expect(nameInput).toHaveValue('my great new rule');
     //check that folder is in the list
     expect(ui.inputs.folder.get()).toHaveTextContent(new RegExp(folder.title));
-    expect(ui.inputs.annotationValue(0).get()).toHaveValue('some description');
-    expect(ui.inputs.annotationValue(1).get()).toHaveValue('some summary');
+    expect(ui.inputs.annotationValue(0).get()).toHaveValue('some summary');
+    expect(ui.inputs.annotationValue(1).get()).toHaveValue('some description');
 
     //check that slashed folders are not in the list
     expect(ui.inputs.folder.get()).toHaveTextContent(new RegExp(folder.title));
@@ -175,9 +183,9 @@ describe('RuleEditor grafana managed rules', () => {
     // expect(within(folderInput).queryByText("Folders with '/' character are not allowed.")).not.toBeInTheDocument();
 
     // add an annotation
-    await clickSelectOptionMatch(ui.inputs.annotationKey(2).get(), /Add new/);
-    await userEvent.type(byRole('textbox').get(ui.inputs.annotationKey(2).get()), 'custom');
-    await userEvent.type(ui.inputs.annotationValue(2).get(), 'value');
+    await userEvent.click(screen.getByText('Add custom annotation'));
+    await userEvent.type(screen.getByPlaceholderText('Enter custom annotation name...'), 'custom');
+    await userEvent.type(screen.getByPlaceholderText('Enter custom annotation content...'), 'value');
 
     //add a label
     await userEvent.type(getLabelInput(ui.inputs.labelKey(2).get()), 'custom{enter}');
@@ -187,29 +195,26 @@ describe('RuleEditor grafana managed rules', () => {
     await userEvent.click(ui.buttons.save.get());
     await waitFor(() => expect(mocks.api.setRulerRuleGroup).toHaveBeenCalled());
 
-    //check that '+ Add new' option is in folders drop down even if we don't have values
-    const emptyFolderInput = await ui.inputs.folderContainer.find();
     mocks.searchFolders.mockResolvedValue([] as DashboardSearchHit[]);
-    await renderRuleEditor(uid);
-    await userEvent.click(within(emptyFolderInput).getByRole('combobox'));
-    expect(screen.getByText(ADD_NEW_FOLER_OPTION)).toBeInTheDocument();
+    expect(screen.getByText('New folder')).toBeInTheDocument();
 
     expect(mocks.api.setRulerRuleGroup).toHaveBeenCalledWith(
       { dataSourceName: GRAFANA_RULES_SOURCE_NAME, apiVersion: 'legacy' },
-      'Folder A',
+      'abcd',
       {
         interval: '1m',
-        name: 'my great new rule',
+        name: 'group1',
         rules: [
           {
             annotations: { description: 'some description', summary: 'some summary', custom: 'value' },
             labels: { severity: 'warn', team: 'the a-team', custom: 'value' },
-            for: '5m',
+            for: '1m',
             grafana_alert: {
               uid,
               condition: 'B',
               data: getDefaultQueries(),
               exec_err_state: GrafanaAlertStateDecision.Error,
+              is_paused: false,
               no_data_state: 'NoData',
               title: 'my great new rule',
             },

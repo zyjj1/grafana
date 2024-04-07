@@ -1,4 +1,9 @@
-import { fieldExtractors, FieldExtractorID } from './fieldExtractors';
+import { FieldType, toDataFrame } from '@grafana/data';
+import { config } from '@grafana/runtime';
+
+import { addExtractedFields } from './extractFields';
+import { fieldExtractors } from './fieldExtractors';
+import { FieldExtractorID } from './types';
 
 describe('Extract fields from text', () => {
   it('JSON extractor', async () => {
@@ -109,5 +114,27 @@ describe('Extract fields from text', () => {
         "foo": "bar",
       }
     `);
+  });
+
+  it('deduplicates names', async () => {
+    const frame = toDataFrame({
+      fields: [{ name: 'foo', type: FieldType.string, values: ['{"foo":"extracedValue1"}'] }],
+    });
+    config.featureToggles.extractFieldsNameDeduplication = true;
+    const newFrame = addExtractedFields(frame, { format: FieldExtractorID.JSON, source: 'foo' });
+    config.featureToggles.extractFieldsNameDeduplication = false;
+    expect(newFrame.fields.length).toBe(2);
+    expect(newFrame.fields[1].name).toBe('foo 1');
+  });
+
+  it('keeps correct names when deduplication is active', async () => {
+    const frame = toDataFrame({
+      fields: [{ name: 'foo', type: FieldType.string, values: ['{"bar":"extracedValue1"}'] }],
+    });
+    config.featureToggles.extractFieldsNameDeduplication = true;
+    const newFrame = addExtractedFields(frame, { format: FieldExtractorID.JSON, source: 'foo' });
+    config.featureToggles.extractFieldsNameDeduplication = false;
+    expect(newFrame.fields.length).toBe(2);
+    expect(newFrame.fields[1].name).toBe('bar');
   });
 });

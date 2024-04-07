@@ -1,23 +1,24 @@
 import { css } from '@emotion/css';
 import Moveable from 'moveable';
-import React, { CSSProperties } from 'react';
+import React, { createRef, CSSProperties, RefObject } from 'react';
+import { ReactZoomPanPinchContentRef } from 'react-zoom-pan-pinch';
 import { BehaviorSubject, ReplaySubject, Subject, Subscription } from 'rxjs';
 import { first } from 'rxjs/operators';
 import Selecto from 'selecto';
 
-import { GrafanaTheme2, PanelData } from '@grafana/data';
+import { AppEvents, GrafanaTheme2, PanelData } from '@grafana/data';
 import { locationService } from '@grafana/runtime/src';
-import { Portal, stylesFactory } from '@grafana/ui';
-import { config } from 'app/core/config';
-import { CanvasFrameOptions, DEFAULT_CANVAS_ELEMENT_CONFIG } from 'app/features/canvas';
 import {
   ColorDimensionConfig,
-  DimensionContext,
   ResourceDimensionConfig,
   ScalarDimensionConfig,
   ScaleDimensionConfig,
   TextDimensionConfig,
-} from 'app/features/dimensions';
+} from '@grafana/schema';
+import { Portal, stylesFactory } from '@grafana/ui';
+import { config } from 'app/core/config';
+import { CanvasFrameOptions, DEFAULT_CANVAS_ELEMENT_CONFIG } from 'app/features/canvas';
+import { DimensionContext } from 'app/features/dimensions';
 import {
   getColorDimensionFromData,
   getResourceDimensionFromData,
@@ -25,12 +26,22 @@ import {
   getScaleDimensionFromData,
   getTextDimensionFromData,
 } from 'app/features/dimensions/utils';
-import { CanvasContextMenu } from 'app/plugins/panel/canvas/CanvasContextMenu';
-import { AnchorPoint, LayerActionID } from 'app/plugins/panel/canvas/types';
+import { CanvasContextMenu } from 'app/plugins/panel/canvas/components/CanvasContextMenu';
+import { CanvasTooltip } from 'app/plugins/panel/canvas/components/CanvasTooltip';
+import { CONNECTION_ANCHOR_DIV_ID } from 'app/plugins/panel/canvas/components/connections/ConnectionAnchors';
+import {
+  Connections,
+  CONNECTION_VERTEX_ADD_ID,
+  CONNECTION_VERTEX_ID,
+} from 'app/plugins/panel/canvas/components/connections/Connections';
+import { AnchorPoint, CanvasTooltipPayload, LayerActionID } from 'app/plugins/panel/canvas/types';
+import { getParent, getTransformInstance } from 'app/plugins/panel/canvas/utils';
 
+import appEvents from '../../../core/app_events';
 import { CanvasPanel } from '../../../plugins/panel/canvas/CanvasPanel';
 import { HorizontalConstraint, Placement, VerticalConstraint } from '../types';
 
+import { SceneTransformWrapper } from './SceneTransformWrapper';
 import { constraintViewable, dimensionViewable, settingsViewable } from './ables';
 import { ElementState } from './element';
 import { FrameState } from './frame';
@@ -53,34 +64,60 @@ export class Scene {
 
   width = 0;
   height = 0;
+  scale = 1;
   style: CSSProperties = {};
   data?: PanelData;
   selecto?: Selecto;
   moveable?: Moveable;
   div?: HTMLDivElement;
+  connections: Connections;
   currentLayer?: FrameState;
   isEditingEnabled?: boolean;
   shouldShowAdvancedTypes?: boolean;
+  shouldPanZoom?: boolean;
+  shouldInfinitePan?: boolean;
   skipNextSelectionBroadcast = false;
   ignoreDataUpdate = false;
   panel: CanvasPanel;
+  contextMenuVisible?: boolean;
+  contextMenuOnVisibilityChange = (visible: boolean) => {
+    this.contextMenuVisible = visible;
+    const transformInstance = getTransformInstance(this);
+    if (transformInstance) {
+      if (visible) {
+        transformInstance.setup.disabled = true;
+      } else {
+        transformInstance.setup.disabled = false;
+      }
+    }
+  };
 
   isPanelEditing = locationService.getSearchObject().editPanel !== undefined;
 
   inlineEditingCallback?: () => void;
   setBackgroundCallback?: (anchorPoint: AnchorPoint) => void;
 
+  tooltipCallback?: (tooltip: CanvasTooltipPayload | undefined) => void;
+  tooltip?: CanvasTooltipPayload;
+
+  moveableActionCallback?: (moved: boolean) => void;
+
   readonly editModeEnabled = new BehaviorSubject<boolean>(false);
   subscription: Subscription;
+
+  targetsToSelect = new Set<HTMLDivElement>();
+  transformComponentRef: RefObject<ReactZoomPanPinchContentRef> | undefined;
 
   constructor(
     cfg: CanvasFrameOptions,
     enableEditing: boolean,
     showAdvancedTypes: boolean,
+    panZoom: boolean,
+    infinitePan: boolean,
     public onSave: (cfg: CanvasFrameOptions) => void,
     panel: CanvasPanel
   ) {
-    this.root = this.load(cfg, enableEditing, showAdvancedTypes);
+    this.root = this.load(cfg, enableEditing, showAdvancedTypes, panZoom, infinitePan);
 
     this.subscription = this.editModeEnabled.subscribe((open) => {
       if (!this.moveable || !this.isEditingEnabled) {
@@ -90,6 +127,8 @@ export class Scene {
     });
 
     this.panel = panel;
+    this.connections = new Connections(this);
+    this.transformComponentRef = createRef();
   }
 
   getNextElementName = (isFrame = false) => {
@@ -111,7 +150,13 @@ export class Scene {
     return !this.byName.has(v);
   };
 
-  load(cfg: CanvasFrameOptions, enableEditing: boolean, showAdvancedTypes: boolean) {
+  load(
+    cfg: CanvasFrameOptions,
+    enableEditing: boolean,
+    showAdvancedTypes: boolean,
+    panZoom: boolean,
+    infinitePan: boolean
+  ) {
     this.root = new RootElement(
       cfg ?? {
         type: 'frame',
@@ -123,6 +168,8 @@ export class Scene {
 
     this.isEditingEnabled = enableEditing;
     this.shouldShowAdvancedTypes = showAdvancedTypes;
+    this.shouldPanZoom = panZoom;
+    this.shouldInfinitePan = infinitePan;
 
     setTimeout(() => {
       if (this.div) {
@@ -131,6 +178,8 @@ export class Scene {
         this.initMoveable(destroySelecto, enableEditing);
         this.currentLayer = this.root;
         this.selection.next([]);
+        this.connections.select(undefined);
+        this.connections.updateState();
       }
     });
     return this.root;
@@ -142,6 +191,7 @@ export class Scene {
     getScalar: (scalar: ScalarDimensionConfig) => getScalarDimensionFromData(this.data, scalar),
     getText: (text: TextDimensionConfig) => getTextDimensionFromData(this.data, text),
     getResource: (res: ResourceDimensionConfig) => getResourceDimensionFromData(this.data, res),
+    getPanelData: () => this.data,
   };
 
   updateData(data: PanelData) {
@@ -256,7 +306,7 @@ export class Scene {
     }
   };
 
-  findElementByTarget = (target: HTMLElement | SVGElement): ElementState | undefined => {
+  findElementByTarget = (target: Element): ElementState | undefined => {
     // We will probably want to add memoization to this as we are calling on drag / resize
 
     const stack = [...this.root.elements];
@@ -276,7 +326,7 @@ export class Scene {
     return undefined;
   };
 
-  setNonTargetPointerEvents = (target: HTMLElement | SVGElement, disablePointerEvents: boolean) => {
+  setNonTargetPointerEvents = (target: Element, disablePointerEvents: boolean) => {
     const stack = [...this.root.elements];
     while (stack.length > 0) {
       const currentElement = stack.shift();
@@ -301,6 +351,11 @@ export class Scene {
       this.selecto.setSelectedTargets(selection.targets);
       this.updateSelection(selection);
       this.editModeEnabled.next(false);
+
+      // Hide connection anchors on programmatic select
+      if (this.connections.connectionAnchorDiv) {
+        this.connections.connectionAnchorDiv.style.display = 'none';
+      }
     }
   };
 
@@ -339,6 +394,22 @@ export class Scene {
     return targetElements;
   };
 
+  disableCustomables = () => {
+    this.moveable!.props = {
+      dimensionViewable: false,
+      constraintViewable: false,
+      settingsViewable: false,
+    };
+  };
+
+  enableCustomables = () => {
+    this.moveable!.props = {
+      dimensionViewable: true,
+      constraintViewable: true,
+      settingsViewable: true,
+    };
+  };
+
   initMoveable = (destroySelecto = false, allowChanges = true) => {
     const targetElements = this.generateTargetElements(this.root.elements);
 
@@ -348,16 +419,30 @@ export class Scene {
 
     this.selecto = new Selecto({
       container: this.div,
-      rootContainer: this.div,
+      rootContainer: getParent(this),
       selectableTargets: targetElements,
       toggleContinueSelect: 'shift',
       selectFromInside: false,
       hitRate: 0,
     });
 
+    const snapDirections = { top: true, left: true, bottom: true, right: true, center: true, middle: true };
+    const elementSnapDirections = { top: true, left: true, bottom: true, right: true, center: true, middle: true };
+
     this.moveable = new Moveable(this.div!, {
       draggable: allowChanges && !this.editModeEnabled.getValue(),
       resizable: allowChanges,
+
+      // Setup rotatable
+      rotatable: allowChanges,
+      throttleRotate: 5,
+
+      // Setup snappable
+      snappable: allowChanges,
+      snapDirections: snapDirections,
+      elementSnapDirections: elementSnapDirections,
+      elementGuidelines: targetElements,
+
       ables: [dimensionViewable, constraintViewable(this), settingsViewable(this)],
       props: {
         dimensionViewable: allowChanges,
@@ -367,6 +452,21 @@ export class Scene {
       origin: false,
       className: this.styles.selected,
     })
+      .on('rotateStart', () => {
+        this.disableCustomables();
+      })
+      .on('rotate', (event) => {
+        const targetedElement = this.findElementByTarget(event.target);
+
+        if (targetedElement) {
+          targetedElement.applyRotate(event);
+        }
+      })
+      .on('rotateEnd', () => {
+        this.enableCustomables();
+        // Update the editor with the new rotation
+        this.moved.next(Date.now());
+      })
       .on('click', (event) => {
         const targetedElement = this.findElementByTarget(event.target);
         let elementSupportsEditing = false;
@@ -384,25 +484,66 @@ export class Scene {
       .on('dragStart', (event) => {
         this.ignoreDataUpdate = true;
         this.setNonTargetPointerEvents(event.target, true);
+
+        // Remove the selected element from the snappable guidelines
+        if (this.moveable && this.moveable.elementGuidelines) {
+          const targetIndex = this.moveable.elementGuidelines.indexOf(event.target);
+          if (targetIndex > -1) {
+            this.moveable.elementGuidelines.splice(targetIndex, 1);
+          }
+        }
       })
-      .on('dragGroupStart', (event) => {
+      .on('dragGroupStart', (e) => {
         this.ignoreDataUpdate = true;
+
+        // Remove the selected elements from the snappable guidelines
+        if (this.moveable && this.moveable.elementGuidelines) {
+          for (let event of e.events) {
+            const targetIndex = this.moveable.elementGuidelines.indexOf(event.target);
+            if (targetIndex > -1) {
+              this.moveable.elementGuidelines.splice(targetIndex, 1);
+            }
+          }
+        }
       })
       .on('drag', (event) => {
         const targetedElement = this.findElementByTarget(event.target);
-        targetedElement!.applyDrag(event);
+        if (targetedElement) {
+          targetedElement.applyDrag(event);
+
+          if (this.connections.connectionsNeedUpdate(targetedElement) && this.moveableActionCallback) {
+            this.moveableActionCallback(true);
+          }
+        }
       })
       .on('dragGroup', (e) => {
-        e.events.forEach((event) => {
+        let needsUpdate = false;
+        for (let event of e.events) {
           const targetedElement = this.findElementByTarget(event.target);
-          targetedElement!.applyDrag(event);
-        });
+          if (targetedElement) {
+            targetedElement.applyDrag(event);
+            if (!needsUpdate) {
+              needsUpdate = this.connections.connectionsNeedUpdate(targetedElement);
+            }
+          }
+        }
+
+        if (needsUpdate && this.moveableActionCallback) {
+          this.moveableActionCallback(true);
+        }
       })
       .on('dragGroupEnd', (e) => {
         e.events.forEach((event) => {
           const targetedElement = this.findElementByTarget(event.target);
           if (targetedElement) {
-            targetedElement.setPlacementFromConstraint();
+            if (targetedElement) {
+              targetedElement.setPlacementFromConstraint(undefined, undefined, this.scale);
+            }
+
+            // re-add the selected elements to the snappable guidelines
+            if (this.moveable && this.moveable.elementGuidelines) {
+              this.moveable.elementGuidelines.push(event.target);
+            }
           }
         });
 
@@ -412,35 +553,77 @@ export class Scene {
       .on('dragEnd', (event) => {
         const targetedElement = this.findElementByTarget(event.target);
         if (targetedElement) {
-          targetedElement.setPlacementFromConstraint();
+          targetedElement.setPlacementFromConstraint(undefined, undefined, this.scale);
         }
 
         this.moved.next(Date.now());
         this.ignoreDataUpdate = false;
         this.setNonTargetPointerEvents(event.target, false);
+
+        // re-add the selected element to the snappable guidelines
+        if (this.moveable && this.moveable.elementGuidelines) {
+          this.moveable.elementGuidelines.push(event.target);
+        }
       })
       .on('resizeStart', (event) => {
         const targetedElement = this.findElementByTarget(event.target);
 
         if (targetedElement) {
+          // Remove the selected element from the snappable guidelines
+          if (this.moveable && this.moveable.elementGuidelines) {
+            const targetIndex = this.moveable.elementGuidelines.indexOf(event.target);
+            if (targetIndex > -1) {
+              this.moveable.elementGuidelines.splice(targetIndex, 1);
+            }
+          }
+
           targetedElement.tempConstraint = { ...targetedElement.options.constraint };
           targetedElement.options.constraint = {
             vertical: VerticalConstraint.Top,
             horizontal: HorizontalConstraint.Left,
           };
-          targetedElement.setPlacementFromConstraint();
+          targetedElement.setPlacementFromConstraint(undefined, undefined, this.scale);
+        }
+      })
+      .on('resizeGroupStart', (e) => {
+        // Remove the selected elements from the snappable guidelines
+        if (this.moveable && this.moveable.elementGuidelines) {
+          for (let event of e.events) {
+            const targetIndex = this.moveable.elementGuidelines.indexOf(event.target);
+            if (targetIndex > -1) {
+              this.moveable.elementGuidelines.splice(targetIndex, 1);
+            }
+          }
         }
       })
       .on('resize', (event) => {
         const targetedElement = this.findElementByTarget(event.target);
-        targetedElement!.applyResize(event);
+        if (targetedElement) {
+          targetedElement.applyResize(event, this.scale);
+
+          if (this.connections.connectionsNeedUpdate(targetedElement) && this.moveableActionCallback) {
+            this.moveableActionCallback(true);
+          }
+        }
         this.moved.next(Date.now()); // TODO only on end
       })
       .on('resizeGroup', (e) => {
-        e.events.forEach((event) => {
+        let needsUpdate = false;
+        for (let event of e.events) {
           const targetedElement = this.findElementByTarget(event.target);
-          targetedElement!.applyResize(event);
-        });
+          if (targetedElement) {
+            targetedElement.applyResize(event);
+
+            if (!needsUpdate) {
+              needsUpdate = this.connections.connectionsNeedUpdate(targetedElement);
+            }
+          }
+        }
+
+        if (needsUpdate && this.moveableActionCallback) {
+          this.moveableActionCallback(true);
+        }
+
         this.moved.next(Date.now()); // TODO only on end
       })
       .on('resizeEnd', (event) => {
@@ -452,13 +635,47 @@ export class Scene {
             targetedElement.tempConstraint = undefined;
           }
 
-          targetedElement.setPlacementFromConstraint();
+          targetedElement.setPlacementFromConstraint(undefined, undefined, this.scale);
+
+          // re-add the selected element to the snappable guidelines
+          if (this.moveable && this.moveable.elementGuidelines) {
+            this.moveable.elementGuidelines.push(event.target);
+          }
+        }
+      })
+      .on('resizeGroupEnd', (e) => {
+        // re-add the selected elements to the snappable guidelines
+        if (this.moveable && this.moveable.elementGuidelines) {
+          for (let event of e.events) {
+            this.moveable.elementGuidelines.push(event.target);
+          }
         }
       });
 
     let targets: Array<HTMLElement | SVGElement> = [];
     this.selecto!.on('dragStart', (event) => {
       const selectedTarget = event.inputEvent.target;
+
+      // If selected target is a connection control, eject to handle connection event
+      if (selectedTarget.id === CONNECTION_ANCHOR_DIV_ID) {
+        this.connections.handleConnectionDragStart(selectedTarget, event.inputEvent.clientX, event.inputEvent.clientY);
+        event.stop();
+        return;
+      }
+
+      // If selected target is a vertex, eject to handle vertex event
+      if (selectedTarget.id === CONNECTION_VERTEX_ID) {
+        this.connections.handleVertexDragStart(selectedTarget);
+        event.stop();
+        return;
+      }
+
+      // If selected target is an add vertex point, eject to handle add vertex event
+      if (selectedTarget.id === CONNECTION_VERTEX_ADD_ID) {
+        this.connections.handleVertexAddDragStart(selectedTarget);
+        event.stop();
+        return;
+      }
 
       const isTargetMoveableElement =
         this.moveable!.isMoveableElement(selectedTarget) ||
@@ -485,6 +702,11 @@ export class Scene {
     })
       .on('select', () => {
         this.editModeEnabled.next(false);
+
+        // Hide connection anchors on select
+        if (this.connections.connectionAnchorDiv) {
+          this.connections.connectionAnchorDiv.style.display = 'none';
+        }
       })
       .on('selectEnd', (event) => {
         targets = event.selected;
@@ -564,18 +786,45 @@ export class Scene {
     dest.reinitializeMoveable();
   };
 
-  render() {
-    const canShowContextMenu = this.isPanelEditing || (!this.isPanelEditing && this.isEditingEnabled);
+  addToSelection = () => {
+    try {
+      let selection: SelectionParams = { targets: [] };
+      selection.targets = [...this.targetsToSelect];
+      this.select(selection);
+    } catch (error) {
+      appEvents.emit(AppEvents.alertError, ['Unable to add to selection']);
+    }
+  };
 
-    return (
+  render() {
+    const isTooltipValid = (this.tooltip?.element?.data?.links?.length ?? 0) > 0;
+    const canShowElementTooltip = !this.isEditingEnabled && isTooltipValid;
+
+    const sceneDiv = (
       <div key={this.revId} className={this.styles.wrap} style={this.style} ref={this.setRef}>
+        {this.connections.render()}
         {this.root.render()}
-        {canShowContextMenu && (
+        {this.isEditingEnabled && (
           <Portal>
-            <CanvasContextMenu scene={this} panel={this.panel} />
+            <CanvasContextMenu
+              scene={this}
+              panel={this.panel}
+              onVisibilityChange={this.contextMenuOnVisibilityChange}
+            />
+          </Portal>
+        )}
+        {canShowElementTooltip && (
+          <Portal>
+            <CanvasTooltip scene={this} />
           </Portal>
         )}
       </div>
+    );
+
+    return config.featureToggles.canvasPanelPanZoom ? (
+      <SceneTransformWrapper scene={this}>{sceneDiv}</SceneTransformWrapper>
+    ) : (
+      sceneDiv
     );
   }
 }

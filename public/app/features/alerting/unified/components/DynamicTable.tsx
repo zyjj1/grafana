@@ -2,6 +2,7 @@ import { css, cx } from '@emotion/css';
 import React, { ReactNode, useState } from 'react';
 
 import { GrafanaTheme2 } from '@grafana/data';
+import { selectors } from '@grafana/e2e-selectors';
 import { IconButton, Pagination, useStyles2 } from '@grafana/ui';
 
 import { usePagination } from '../hooks/usePagination';
@@ -17,6 +18,7 @@ export interface DynamicTableColumnProps<T = unknown> {
 
   renderCell: (item: DynamicTableItemProps<T>, index: number) => ReactNode;
   size?: number | string;
+  className?: string;
 }
 
 export interface DynamicTableItemProps<T = unknown> {
@@ -28,6 +30,7 @@ export interface DynamicTableItemProps<T = unknown> {
 export interface DynamicTableProps<T = unknown> {
   cols: Array<DynamicTableColumnProps<T>>;
   items: Array<DynamicTableItemProps<T>>;
+  dataTestId?: string;
 
   isExpandable?: boolean;
   pagination?: DynamicTablePagination;
@@ -70,6 +73,7 @@ export const DynamicTable = <T extends object>({
   renderPrefixCell,
   renderPrefixHeader,
   footerRow,
+  dataTestId,
 }: DynamicTableProps<T>) => {
   const defaultPaginationStyles = useStyles2(getPaginationStyles);
 
@@ -98,7 +102,7 @@ export const DynamicTable = <T extends object>({
 
   return (
     <>
-      <div className={styles.container} data-testid="dynamic-table">
+      <div className={styles.container} data-testid={dataTestId ?? 'dynamic-table'}>
         <div className={styles.row} data-testid="header">
           {renderPrefixHeader && renderPrefixHeader()}
           {isExpandable && <div className={styles.cell} />}
@@ -121,23 +125,27 @@ export const DynamicTable = <T extends object>({
               {isExpandable && (
                 <div className={cx(styles.cell, styles.expandCell)}>
                   <IconButton
-                    aria-label={`${isItemExpanded ? 'Collapse' : 'Expand'} row`}
-                    size="xl"
-                    data-testid="collapse-toggle"
-                    className={styles.expandButton}
+                    tooltip={`${isItemExpanded ? 'Collapse' : 'Expand'} row`}
+                    data-testid={selectors.components.AlertRules.toggle}
                     name={isItemExpanded ? 'angle-down' : 'angle-right'}
                     onClick={() => toggleExpanded(item)}
-                    type="button"
                   />
                 </div>
               )}
               {cols.map((col) => (
-                <div className={cx(styles.cell, styles.bodyCell)} data-column={col.label} key={`${item.id}-${col.id}`}>
+                <div
+                  className={cx(styles.cell, styles.bodyCell, col.className)}
+                  data-column={col.label}
+                  key={`${item.id}-${col.id}`}
+                >
                   {col.renderCell(item, index)}
                 </div>
               ))}
               {isItemExpanded && renderExpandedContent && (
-                <div className={styles.expandedContentRow} data-testid="expanded-content">
+                <div
+                  className={styles.expandedContentRow}
+                  data-testid={selectors.components.AlertRules.expandedContent}
+                >
                   {renderExpandedContent(item, index, items)}
                 </div>
               )}
@@ -186,8 +194,8 @@ const getStyles = <T extends unknown>(
 
   return (theme: GrafanaTheme2) => ({
     container: css`
-      border: 1px solid ${theme.colors.border.strong};
-      border-radius: 2px;
+      border: 1px solid ${theme.colors.border.weak};
+      border-radius: ${theme.shape.radius.default};
       color: ${theme.colors.text.secondary};
     `,
     row: css`
@@ -226,6 +234,7 @@ const getStyles = <T extends unknown>(
       padding: ${theme.spacing(1)};
     `,
     cell: css`
+      display: flex;
       align-items: center;
       padding: ${theme.spacing(1)};
 
@@ -269,10 +278,6 @@ const getStyles = <T extends unknown>(
         grid-row: auto;
         padding: ${theme.spacing(1)} 0 0 0;
       }
-    `,
-    expandButton: css`
-      margin-right: 0;
-      display: block;
     `,
   });
 };

@@ -1,4 +1,3 @@
-const CopyWebpackPlugin = require('copy-webpack-plugin');
 const path = require('path');
 const webpack = require('webpack');
 
@@ -22,8 +21,27 @@ module.exports = {
       // some of data source plugins use global Prism object to add the language definition
       // we want to have same Prism object in core and in grafana/ui
       prismjs: require.resolve('prismjs'),
+      // some sub-dependencies use a different version of @emotion/react and generate warnings
+      // in the browser about @emotion/react loaded twice. We want to only load it once
+      '@emotion/react': require.resolve('@emotion/react'),
+      // due to our webpack configuration not understanding package.json `exports`
+      // correctly we must alias this package to the correct file
+      // the alternative to this alias is to copy-paste the file into our
+      // source code and miss out in updates
+      '@locker/near-membrane-dom/custom-devtools-formatter': require.resolve(
+        '@locker/near-membrane-dom/custom-devtools-formatter.js'
+      ),
     },
-    modules: ['node_modules', path.resolve('public')],
+    modules: [
+      // default value
+      'node_modules',
+
+      // required for grafana enterprise resolution
+      path.resolve('node_modules'),
+
+      // required to for 'bare' imports (like 'app/core/utils' etc)
+      path.resolve('public'),
+    ],
     fallback: {
       buffer: false,
       fs: false,
@@ -32,36 +50,21 @@ module.exports = {
       https: false,
       string_decoder: false,
     },
-    symlinks: false,
   },
-  ignoreWarnings: [/export .* was not found in/],
-  stats: {
-    children: false,
-    source: false,
-  },
+  ignoreWarnings: [
+    /export .* was not found in/,
+    {
+      module: /@kusto\/language-service\/bridge\.min\.js$/,
+      message: /^Critical dependency: the request of a dependency is an expression$/,
+    },
+  ],
   plugins: [
+    new webpack.NormalModuleReplacementPlugin(/^@grafana\/schema\/dist\/esm\/(.*)$/, (resource) => {
+      resource.request = resource.request.replace('@grafana/schema/dist/esm', '@grafana/schema/src');
+    }),
     new CorsWorkerPlugin(),
     new webpack.ProvidePlugin({
       Buffer: ['buffer', 'Buffer'],
-    }),
-    new CopyWebpackPlugin({
-      patterns: [
-        {
-          context: path.join(require.resolve('monaco-editor/package.json'), '../min/vs/'),
-          from: '**/*',
-          to: '../lib/monaco/min/vs/', // inside the public/build folder
-          globOptions: {
-            ignore: [
-              '**/*.map', // debug files
-            ],
-          },
-        },
-        {
-          context: path.join(require.resolve('@kusto/monaco-kusto'), '../'),
-          from: '**/*',
-          to: '../lib/monaco/min/vs/language/kusto/',
-        },
-      ],
     }),
   ],
   module: {
@@ -105,6 +108,13 @@ module.exports = {
       {
         test: /(unicons|mono|custom)[\\/].*\.svg$/,
         type: 'asset/source',
+      },
+      {
+        // Required for msagl library (used in Nodegraph panel) to work
+        test: /\.m?js$/,
+        resolve: {
+          fullySpecified: false,
+        },
       },
     ],
   },

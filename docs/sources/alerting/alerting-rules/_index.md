@@ -1,26 +1,48 @@
 ---
 aliases:
-  - old-alerting/create-alerts/
-  - rules/
-  - unified-alerting/alerting-rules/
-title: Manage your alert rules
-weight: 130
+  - rules/ # /docs/grafana/<GRAFANA_VERSION>/alerting/rules/
+  - unified-alerting/alerting-rules/ # /docs/grafana/<GRAFANA_VERSION>/alerting/unified-alerting/alerting-rules/
+  - ./create-alerts/ # /docs/grafana/<GRAFANA_VERSION>/alerting/create-alerts/
+canonical: https://grafana.com/docs/grafana/latest/alerting/alerting-rules/
+description: Configure alert rules
+labels:
+  products:
+    - cloud
+    - enterprise
+    - oss
+title: Configure alert rules
+weight: 120
 ---
 
-# Manage your alert rules
+# Configure alert rules
 
-An alert rule is a set of evaluation criteria that determines whether an alert will fire. The alert rule consists of one or more queries and expressions, a condition, the frequency of evaluation, and optionally, the duration over which the condition is met.
+An alert rule consists of one or more queries and expressions that select the data you want to measure. It also contains a condition, which is the threshold that an alert rule must meet or exceed in order to fire.
 
-While queries and expressions select the data set to evaluate, a condition sets the threshold that an alert must meet or exceed to create an alert. An interval specifies how frequently an alert rule is evaluated. Duration, when configured, indicates how long a condition must be met. Alert rules can also define alerting behavior in the absence of data.
+Create, manage, view, and adjust alert rules to alert on your metrics data or log entries from multiple data sources — no matter where your data is stored.
 
-You can:
+The main parts of alert rule creation are:
 
-- [Create Grafana Mimir or Loki managed alert rules]({{< relref "create-mimir-loki-managed-rule/" >}})
-- [Create Grafana Mimir or Loki managed recording rules]({{< relref "create-mimir-loki-managed-recording-rule/" >}})
-- [Edit Grafana Mimir or Loki rule groups and namespaces]({{< relref "edit-mimir-loki-namespace-group/" >}})
-- [Create Grafana managed alert rules]({{< relref "create-grafana-managed-rule/" >}})
+1. Select your data source
+1. Query your data
+1. Normalize your data
+1. Set your threshold
 
-**Note:**
-Grafana managed alert rules can only be edited or deleted by users with Edit permissions for the folder storing the rules.
+**Query, expressions, and alert condition**
 
-Alert rules for an external Grafana Mimir or Loki instance can be edited or deleted by users with Editor or Admin roles.
+What are you monitoring? How are you measuring it?
+
+{{< admonition type="note" >}}
+Expressions can only be used for Grafana-managed alert rules.
+{{< /admonition >}}
+
+**Evaluation**
+
+How do you want your alert to be evaluated?
+
+**Labels and notifications**
+
+How do you want to route your alert? What kind of additional labels could you add to annotate your alert rules and ease searching?
+
+**Annotations**
+
+Do you want to add more context on the alert in your notification messages, for example, what caused the alert to fire? Which server did it happen on?

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/grafana/grafana/pkg/events"
-	"github.com/grafana/grafana/pkg/models"
 	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/services/user"
 	"github.com/grafana/grafana/pkg/util"
@@ -51,12 +50,9 @@ func (ss *SQLStore) createUser(ctx context.Context, sess *DBSession, args user.C
 		args.Email = args.Login
 	}
 
-	where := "email=? OR login=?"
-	if ss.Cfg.CaseInsensitiveLogin {
-		where = "LOWER(email)=LOWER(?) OR LOWER(login)=LOWER(?)"
-		args.Login = strings.ToLower(args.Login)
-		args.Email = strings.ToLower(args.Email)
-	}
+	where := "LOWER(email)=LOWER(?) OR LOWER(login)=LOWER(?)"
+	args.Login = strings.ToLower(args.Login)
+	args.Email = strings.ToLower(args.Email)
 
 	exists, err := sess.Where(where, args.Email, args.Login).Get(&user.User{})
 	if err != nil {
@@ -89,11 +85,11 @@ func (ss *SQLStore) createUser(ctx context.Context, sess *DBSession, args user.C
 	usr.Rands = rands
 
 	if len(args.Password) > 0 {
-		encodedPassword, err := util.EncodePassword(args.Password, usr.Salt)
+		encodedPassword, err := util.EncodePassword(string(args.Password), usr.Salt)
 		if err != nil {
 			return usr, err
 		}
-		usr.Password = encodedPassword
+		usr.Password = user.Password(encodedPassword)
 	}
 
 	sess.UseBool("is_admin")
@@ -110,9 +106,9 @@ func (ss *SQLStore) createUser(ctx context.Context, sess *DBSession, args user.C
 		Email:     usr.Email,
 	})
 
-	orgUser := models.OrgUser{
-		OrgId:   orgID,
-		UserId:  usr.ID,
+	orgUser := org.OrgUser{
+		OrgID:   orgID,
+		UserID:  usr.ID,
 		Role:    org.RoleAdmin,
 		Created: time.Now(),
 		Updated: time.Now(),
@@ -140,13 +136,14 @@ func verifyExistingOrg(sess *DBSession, orgId int64) error {
 		return err
 	}
 	if !has {
-		return org.ErrOrgNotFound
+		return org.ErrOrgNotFound.Errorf("failed to verify existing org")
 	}
 	return nil
 }
 
 func (ss *SQLStore) getOrCreateOrg(sess *DBSession, orgName string) (int64, error) {
 	var org org.Org
+
 	if ss.Cfg.AutoAssignOrg {
 		has, err := sess.Where("id=?", ss.Cfg.AutoAssignOrgId).Get(&org)
 		if err != nil {
@@ -155,6 +152,7 @@ func (ss *SQLStore) getOrCreateOrg(sess *DBSession, orgName string) (int64, erro
 		if has {
 			return org.ID, nil
 		}
+		ss.log.Debug("auto assigned organization not found")
 
 		if ss.Cfg.AutoAssignOrgId != 1 {
 			ss.log.Error("Could not create user: organization ID does not exist", "orgID",
@@ -164,19 +162,21 @@ func (ss *SQLStore) getOrCreateOrg(sess *DBSession, orgName string) (int64, erro
 		}
 
 		org.Name = mainOrgName
+		org.Created = time.Now()
+		org.Updated = org.Created
 		org.ID = int64(ss.Cfg.AutoAssignOrgId)
-	} else {
-		org.Name = orgName
-	}
-
-	org.Created = time.Now()
-	org.Updated = time.Now()
-
-	if org.ID != 0 {
-		if _, err := sess.InsertId(&org, ss.Dialect); err != nil {
+		if err := sess.InsertId(&org, ss.Dialect); err != nil {
+			ss.log.Error("failed to insert organization with provided id", "org_id", org.ID, "err", err)
+			// ignore failure if for some reason the organization exists
+			if ss.GetDialect().IsUniqueConstraintViolation(err) {
+				return org.ID, nil
+			}
 			return 0, err
 		}
 	} else {
+		org.Name = orgName
+		org.Created = time.Now()
+		org.Updated = org.Created
 		if _, err := sess.InsertOne(&org); err != nil {
 			return 0, err
 		}

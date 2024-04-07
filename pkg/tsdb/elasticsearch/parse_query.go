@@ -2,27 +2,31 @@ package elasticsearch
 
 import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
+
 	"github.com/grafana/grafana/pkg/components/simplejson"
+	"github.com/grafana/grafana/pkg/infra/log"
 )
 
-func parseQuery(tsdbQuery []backend.DataQuery) ([]*Query, error) {
+func parseQuery(tsdbQuery []backend.DataQuery, logger log.Logger) ([]*Query, error) {
 	queries := make([]*Query, 0)
 	for _, q := range tsdbQuery {
 		model, err := simplejson.NewJson(q.JSON)
 		if err != nil {
 			return nil, err
 		}
-		timeField, err := model.Get("timeField").String()
-		if err != nil {
-			return nil, err
-		}
+
+		// we had a string-field named `timeField` in the past. we do not use it anymore.
+		// please do not create a new field with that name, to avoid potential problems with old, persisted queries.
+
 		rawQuery := model.Get("query").MustString()
 		bucketAggs, err := parseBucketAggs(model)
 		if err != nil {
+			logger.Error("Failed to parse bucket aggs in query", "error", err, "model", string(q.JSON))
 			return nil, err
 		}
 		metrics, err := parseMetrics(model)
 		if err != nil {
+			logger.Error("Failed to parse metrics in query", "error", err, "model", string(q.JSON))
 			return nil, err
 		}
 		alias := model.Get("alias").MustString("")
@@ -30,7 +34,6 @@ func parseQuery(tsdbQuery []backend.DataQuery) ([]*Query, error) {
 		interval := q.Interval
 
 		queries = append(queries, &Query{
-			TimeField:     timeField,
 			RawQuery:      rawQuery,
 			BucketAggs:    bucketAggs,
 			Metrics:       metrics,
@@ -39,6 +42,7 @@ func parseQuery(tsdbQuery []backend.DataQuery) ([]*Query, error) {
 			IntervalMs:    intervalMs,
 			RefID:         q.RefID,
 			MaxDataPoints: q.MaxDataPoints,
+			TimeRange:     q.TimeRange,
 		})
 	}
 
@@ -47,8 +51,9 @@ func parseQuery(tsdbQuery []backend.DataQuery) ([]*Query, error) {
 
 func parseBucketAggs(model *simplejson.Json) ([]*BucketAgg, error) {
 	var err error
-	var result []*BucketAgg
-	for _, t := range model.Get("bucketAggs").MustArray() {
+	bucketAggs := model.Get("bucketAggs").MustArray()
+	result := make([]*BucketAgg, 0, len(bucketAggs))
+	for _, t := range bucketAggs {
 		aggJSON := simplejson.NewFromAny(t)
 		agg := &BucketAgg{}
 
@@ -72,8 +77,9 @@ func parseBucketAggs(model *simplejson.Json) ([]*BucketAgg, error) {
 
 func parseMetrics(model *simplejson.Json) ([]*MetricAgg, error) {
 	var err error
-	var result []*MetricAgg
-	for _, t := range model.Get("metrics").MustArray() {
+	metrics := model.Get("metrics").MustArray()
+	result := make([]*MetricAgg, 0, len(metrics))
+	for _, t := range metrics {
 		metricJSON := simplejson.NewFromAny(t)
 		metric := &MetricAgg{}
 
@@ -101,7 +107,7 @@ func parseMetrics(model *simplejson.Json) ([]*MetricAgg, error) {
 			metric.PipelineVariables = map[string]string{}
 			pvArr := metricJSON.Get("pipelineVariables").MustArray()
 			for _, v := range pvArr {
-				kv := v.(map[string]interface{})
+				kv := v.(map[string]any)
 				metric.PipelineVariables[kv["name"].(string)] = kv["pipelineAgg"].(string)
 			}
 		}

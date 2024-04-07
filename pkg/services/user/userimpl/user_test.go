@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/grafana/grafana/pkg/infra/localcache"
 	"github.com/grafana/grafana/pkg/models/roletype"
@@ -12,9 +16,6 @@ import (
 	"github.com/grafana/grafana/pkg/services/team/teamtest"
 	"github.com/grafana/grafana/pkg/services/user"
 	"github.com/grafana/grafana/pkg/setting"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestUserService(t *testing.T) {
@@ -37,20 +38,18 @@ func TestUserService(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("get user by ID", func(t *testing.T) {
-		userService.cfg = setting.NewCfg()
-		userService.cfg.CaseInsensitiveLogin = false
-		userStore.ExpectedUser = &user.User{ID: 1, Email: "email", Login: "login", Name: "name"}
-		u, err := userService.GetByID(context.Background(), &user.GetUserByIDQuery{ID: 1})
-		require.NoError(t, err)
-		require.Equal(t, "login", u.Login)
-		require.Equal(t, "name", u.Name)
-		require.Equal(t, "email", u.Email)
+	t.Run("create user should fail when username and email are empty", func(t *testing.T) {
+		_, err := userService.Create(context.Background(), &user.CreateUserCommand{
+			Email: "",
+			Login: "",
+			Name:  "name",
+		})
+
+		require.ErrorIs(t, err, user.ErrEmptyUsernameAndEmail)
 	})
 
-	t.Run("get user by ID with case insensitive login", func(t *testing.T) {
+	t.Run("get user by ID", func(t *testing.T) {
 		userService.cfg = setting.NewCfg()
-		userService.cfg.CaseInsensitiveLogin = true
 		userStore.ExpectedUser = &user.User{ID: 1, Email: "email", Login: "login", Name: "name"}
 		u, err := userService.GetByID(context.Background(), &user.GetUserByIDQuery{ID: 1})
 		require.NoError(t, err)
@@ -88,7 +87,6 @@ func TestUserService(t *testing.T) {
 	})
 
 	t.Run("GetByID - email conflict", func(t *testing.T) {
-		userService.cfg.CaseInsensitiveLogin = true
 		userStore.ExpectedError = errors.New("email conflict")
 		query := user.GetUserByIDQuery{}
 		_, err := userService.GetByID(context.Background(), &query)
@@ -192,13 +190,40 @@ func TestUserService(t *testing.T) {
 	})
 }
 
+func TestMetrics(t *testing.T) {
+	userStore := newUserStoreFake()
+	orgService := orgtest.NewOrgServiceFake()
+
+	userService := Service{
+		store:        userStore,
+		orgService:   orgService,
+		cacheService: localcache.ProvideService(),
+		teamService:  &teamtest.FakeService{},
+	}
+
+	t.Run("update user with role None", func(t *testing.T) {
+		userStore.ExpectedCountUserAccountsWithEmptyRoles = int64(1)
+
+		userService.cfg = setting.NewCfg()
+		userService.cfg.BasicAuthStrongPasswordPolicy = true
+
+		stats := userService.GetUsageStats(context.Background())
+		assert.NotEmpty(t, stats)
+
+		assert.Len(t, stats, 2, stats)
+		assert.Equal(t, int64(1), stats["stats.user.role_none.count"])
+		assert.Equal(t, 1, stats["stats.password_policy.count"])
+	})
+}
+
 type FakeUserStore struct {
-	ExpectedUser                  *user.User
-	ExpectedSignedInUser          *user.SignedInUser
-	ExpectedUserProfile           *user.UserProfileDTO
-	ExpectedSearchUserQueryResult *user.SearchUserQueryResult
-	ExpectedError                 error
-	ExpectedDeleteUserError       error
+	ExpectedUser                            *user.User
+	ExpectedSignedInUser                    *user.SignedInUser
+	ExpectedUserProfile                     *user.UserProfileDTO
+	ExpectedSearchUserQueryResult           *user.SearchUserQueryResult
+	ExpectedError                           error
+	ExpectedDeleteUserError                 error
+	ExpectedCountUserAccountsWithEmptyRoles int64
 }
 
 func newUserStoreFake() *FakeUserStore {
@@ -229,7 +254,7 @@ func (f *FakeUserStore) CaseInsensitiveLoginConflict(context.Context, string, st
 	return f.ExpectedError
 }
 
-func (f *FakeUserStore) LoginConflict(context.Context, string, string, bool) error {
+func (f *FakeUserStore) LoginConflict(context.Context, string, string) error {
 	return f.ExpectedError
 }
 
@@ -287,4 +312,34 @@ func (f *FakeUserStore) Search(ctx context.Context, query *user.SearchUsersQuery
 
 func (f *FakeUserStore) Count(ctx context.Context) (int64, error) {
 	return 0, nil
+}
+
+func (f *FakeUserStore) CountUserAccountsWithEmptyRole(ctx context.Context) (int64, error) {
+	return f.ExpectedCountUserAccountsWithEmptyRoles, nil
+}
+
+func TestUpdateLastSeenAt(t *testing.T) {
+	userStore := newUserStoreFake()
+	orgService := orgtest.NewOrgServiceFake()
+	userService := Service{
+		store:        userStore,
+		orgService:   orgService,
+		cacheService: localcache.ProvideService(),
+		teamService:  &teamtest.FakeService{},
+	}
+	userService.cfg = setting.NewCfg()
+
+	t.Run("update last seen at", func(t *testing.T) {
+		userStore.ExpectedSignedInUser = &user.SignedInUser{UserID: 1, OrgID: 1, Email: "email", Login: "login", Name: "name", LastSeenAt: time.Now().Add(-10 * time.Minute)}
+		err := userService.UpdateLastSeenAt(context.Background(), &user.UpdateUserLastSeenAtCommand{UserID: 1, OrgID: 1})
+		require.NoError(t, err)
+	})
+
+	userService.cacheService.Flush()
+
+	t.Run("do not update last seen at", func(t *testing.T) {
+		userStore.ExpectedSignedInUser = &user.SignedInUser{UserID: 1, OrgID: 1, Email: "email", Login: "login", Name: "name", LastSeenAt: time.Now().Add(-1 * time.Minute)}
+		err := userService.UpdateLastSeenAt(context.Background(), &user.UpdateUserLastSeenAtCommand{UserID: 1, OrgID: 1})
+		require.ErrorIs(t, err, user.ErrLastSeenUpToDate, err)
+	})
 }

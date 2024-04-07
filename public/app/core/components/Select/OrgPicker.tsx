@@ -2,8 +2,8 @@ import React, { useEffect } from 'react';
 import { useAsyncFn } from 'react-use';
 
 import { SelectableValue } from '@grafana/data';
+import { getBackendSrv } from '@grafana/runtime';
 import { AsyncSelect } from '@grafana/ui';
-import { getBackendSrv } from 'app/core/services/backend_srv';
 import { Organization, UserOrg } from 'app/types';
 
 export type OrgSelectItem = SelectableValue<Organization>;
@@ -45,8 +45,11 @@ export function OrgPicker({ onSelected, className, inputId, autoFocus, excludeOr
       className={className}
       isLoading={orgOptionsState.loading}
       defaultOptions={true}
-      isSearchable={false}
       loadOptions={getOrgOptions}
+      filterOption={(option, rawInput) => {
+        const input = rawInput.toLowerCase();
+        return !!option.value?.name.toLowerCase().includes(input);
+      }}
       onChange={onSelected}
       placeholder="Select organization"
       noOptionsMessage="No organizations found"

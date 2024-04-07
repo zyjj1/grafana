@@ -3,12 +3,12 @@ import { commonOptionsBuilder } from '@grafana/ui';
 
 import { AutoEditor } from './AutoEditor';
 import { ManualEditor } from './ManualEditor';
-import { XYChartPanel2 } from './XYChartPanel2';
+import { XYChartPanel } from './XYChartPanel';
 import { getScatterFieldConfig } from './config';
-import { defaultScatterConfig, XYChartOptions, ScatterFieldConfig } from './models.gen';
+import { Options, FieldConfig, defaultFieldConfig } from './panelcfg.gen';
 
-export const plugin = new PanelPlugin<XYChartOptions, ScatterFieldConfig>(XYChartPanel2)
-  .useFieldConfig(getScatterFieldConfig(defaultScatterConfig))
+export const plugin = new PanelPlugin<Options, FieldConfig>(XYChartPanel)
+  .useFieldConfig(getScatterFieldConfig(defaultFieldConfig))
   .setPanelOptions((builder) => {
     builder
       .addRadio({
@@ -17,8 +17,8 @@ export const plugin = new PanelPlugin<XYChartOptions, ScatterFieldConfig>(XYChar
         defaultValue: 'auto',
         settings: {
           options: [
-            { value: 'auto', label: 'Auto', description: 'No changes to saved model since 8.0' },
-            { value: 'manual', label: 'Manual' },
+            { value: 'auto', label: 'Table', description: 'Plot values within a single table result' },
+            { value: 'manual', label: 'Manual', description: 'Construct values from any result' },
           ],
         },
       })
@@ -38,6 +38,6 @@ export const plugin = new PanelPlugin<XYChartOptions, ScatterFieldConfig>(XYChar
         showIf: (cfg) => cfg.seriesMapping === 'manual',
       });
 
-    commonOptionsBuilder.addTooltipOptions(builder);
+    commonOptionsBuilder.addTooltipOptions(builder, true);
     commonOptionsBuilder.addLegendOptions(builder);
   });

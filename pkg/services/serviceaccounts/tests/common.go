@@ -7,17 +7,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/grafana/grafana/pkg/infra/db"
-	"github.com/grafana/grafana/pkg/services/accesscontrol"
-	accesscontrolmock "github.com/grafana/grafana/pkg/services/accesscontrol/mock"
 	"github.com/grafana/grafana/pkg/services/apikey"
 	"github.com/grafana/grafana/pkg/services/apikey/apikeyimpl"
 	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/services/org/orgimpl"
 	"github.com/grafana/grafana/pkg/services/quota/quotaimpl"
 	"github.com/grafana/grafana/pkg/services/quota/quotatest"
-	"github.com/grafana/grafana/pkg/services/sqlstore"
+	"github.com/grafana/grafana/pkg/services/supportbundles/supportbundlestest"
 	"github.com/grafana/grafana/pkg/services/user"
 	"github.com/grafana/grafana/pkg/services/user/userimpl"
+	"github.com/grafana/grafana/pkg/setting"
 )
 
 type TestUser struct {
@@ -25,7 +24,6 @@ type TestUser struct {
 	Role             string
 	Login            string
 	IsServiceAccount bool
-	OrgID            int64
 }
 
 type TestApiKey struct {
@@ -37,30 +35,35 @@ type TestApiKey struct {
 	ServiceAccountID *int64
 }
 
-func SetupUserServiceAccount(t *testing.T, sqlStore *sqlstore.SQLStore, testUser TestUser) *user.User {
+func SetupUserServiceAccount(t *testing.T, db db.DB, cfg *setting.Cfg, testUser TestUser) *user.User {
 	role := string(org.RoleViewer)
 	if testUser.Role != "" {
 		role = testUser.Role
 	}
 
-	quotaService := quotaimpl.ProvideService(sqlStore, sqlStore.Cfg)
-	orgService, err := orgimpl.ProvideService(sqlStore, sqlStore.Cfg, quotaService)
+	quotaService := quotaimpl.ProvideService(db, cfg)
+	orgService, err := orgimpl.ProvideService(db, cfg, quotaService)
 	require.NoError(t, err)
-	usrSvc, err := userimpl.ProvideService(sqlStore, orgService, sqlStore.Cfg, nil, nil, quotaService)
+	usrSvc, err := userimpl.ProvideService(db, orgService, cfg, nil, nil, quotaService, supportbundlestest.NewFakeBundleService())
 	require.NoError(t, err)
 
-	u1, err := usrSvc.CreateUserForTests(context.Background(), &user.CreateUserCommand{
+	org, err := orgService.CreateWithMember(context.Background(), &org.CreateOrgCommand{
+		Name: "test org",
+	})
+	require.NoError(t, err)
+
+	u1, err := usrSvc.Create(context.Background(), &user.CreateUserCommand{
 		Login:            testUser.Login,
 		IsServiceAccount: testUser.IsServiceAccount,
 		DefaultOrgRole:   role,
 		Name:             testUser.Name,
-		OrgID:            testUser.OrgID,
+		OrgID:            org.ID,
 	})
 	require.NoError(t, err)
 	return u1
 }
 
-func SetupApiKey(t *testing.T, sqlStore *sqlstore.SQLStore, testKey TestApiKey) *apikey.APIKey {
+func SetupApiKey(t *testing.T, store db.DB, cfg *setting.Cfg, testKey TestApiKey) *apikey.APIKey {
 	role := org.RoleViewer
 	if testKey.Role != "" {
 		role = testKey.Role
@@ -69,7 +72,7 @@ func SetupApiKey(t *testing.T, sqlStore *sqlstore.SQLStore, testKey TestApiKey) 
 	addKeyCmd := &apikey.AddCommand{
 		Name:             testKey.Name,
 		Role:             role,
-		OrgId:            testKey.OrgId,
+		OrgID:            testKey.OrgId,
 		ServiceAccountID: testKey.ServiceAccountID,
 	}
 
@@ -80,34 +83,54 @@ func SetupApiKey(t *testing.T, sqlStore *sqlstore.SQLStore, testKey TestApiKey) 
 	}
 
 	quotaService := quotatest.New(false, nil)
-	apiKeyService, err := apikeyimpl.ProvideService(sqlStore, sqlStore.Cfg, quotaService)
+	apiKeyService, err := apikeyimpl.ProvideService(store, cfg, quotaService)
 	require.NoError(t, err)
-	err = apiKeyService.AddAPIKey(context.Background(), addKeyCmd)
+	key, err := apiKeyService.AddAPIKey(context.Background(), addKeyCmd)
 	require.NoError(t, err)
 
 	if testKey.IsExpired {
-		err := sqlStore.WithTransactionalDbSession(context.Background(), func(sess *db.Session) error {
+		err := store.WithTransactionalDbSession(context.Background(), func(sess *db.Session) error {
 			// Force setting expires to time before now to make key expired
 			var expires int64 = 1
-			key := apikey.APIKey{Expires: &expires}
-			rowsAffected, err := sess.ID(addKeyCmd.Result.Id).Update(&key)
+			expiringKey := apikey.APIKey{Expires: &expires}
+			rowsAffected, err := sess.ID(key.ID).Update(&expiringKey)
 			require.Equal(t, int64(1), rowsAffected)
 			return err
 		})
 		require.NoError(t, err)
 	}
 
-	return addKeyCmd.Result
+	return key
 }
 
-func SetupMockAccesscontrol(t *testing.T,
-	userpermissionsfunc func(c context.Context, siu *user.SignedInUser, opt accesscontrol.Options) ([]accesscontrol.Permission, error),
-	disableAccessControl bool) *accesscontrolmock.Mock {
-	t.Helper()
-	acmock := accesscontrolmock.New()
-	if disableAccessControl {
-		acmock = acmock.WithDisabled()
+// SetupUsersServiceAccounts creates in "test org" all users or service accounts passed in parameter
+// To achieve this, it sets the AutoAssignOrg and AutoAssignOrgId settings.
+func SetupUsersServiceAccounts(t *testing.T, sqlStore db.DB, cfg *setting.Cfg, testUsers []TestUser) (orgID int64) {
+	role := string(org.RoleNone)
+
+	quotaService := quotaimpl.ProvideService(sqlStore, cfg)
+	orgService, err := orgimpl.ProvideService(sqlStore, cfg, quotaService)
+	require.NoError(t, err)
+	usrSvc, err := userimpl.ProvideService(sqlStore, orgService, cfg, nil, nil, quotaService, supportbundlestest.NewFakeBundleService())
+	require.NoError(t, err)
+
+	org, err := orgService.CreateWithMember(context.Background(), &org.CreateOrgCommand{
+		Name: "test org",
+	})
+	require.NoError(t, err)
+
+	cfg.AutoAssignOrg = true
+	cfg.AutoAssignOrgId = int(org.ID)
+
+	for i := range testUsers {
+		_, err := usrSvc.Create(context.Background(), &user.CreateUserCommand{
+			Login:            testUsers[i].Login,
+			IsServiceAccount: testUsers[i].IsServiceAccount,
+			DefaultOrgRole:   role,
+			Name:             testUsers[i].Name,
+			OrgID:            org.ID,
+		})
+		require.NoError(t, err)
 	}
-	acmock.GetUserPermissionsFunc = userpermissionsfunc
-	return acmock
+	return org.ID
 }

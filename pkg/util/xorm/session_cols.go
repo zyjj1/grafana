@@ -12,7 +12,7 @@ import (
 	"xorm.io/core"
 )
 
-func setColumnInt(bean interface{}, col *core.Column, t int64) {
+func setColumnInt(bean any, col *core.Column, t int64) {
 	v, err := col.ValueOf(bean)
 	if err != nil {
 		return
@@ -27,7 +27,7 @@ func setColumnInt(bean interface{}, col *core.Column, t int64) {
 	}
 }
 
-func setColumnTime(bean interface{}, col *core.Column, t time.Time) {
+func setColumnTime(bean any, col *core.Column, t time.Time) {
 	v, err := col.ValueOf(bean)
 	if err != nil {
 		return
@@ -76,24 +76,6 @@ func col2NewCols(columns ...string) []string {
 	return newColumns
 }
 
-// Incr provides a query string like "count = count + 1"
-func (session *Session) Incr(column string, arg ...interface{}) *Session {
-	session.statement.Incr(column, arg...)
-	return session
-}
-
-// Decr provides a query string like "count = count - 1"
-func (session *Session) Decr(column string, arg ...interface{}) *Session {
-	session.statement.Decr(column, arg...)
-	return session
-}
-
-// SetExpr provides a query string like "column = {expression}"
-func (session *Session) SetExpr(column string, expression interface{}) *Session {
-	session.statement.SetExpr(column, expression)
-	return session
-}
-
 // Select provides some columns to special
 func (session *Session) Select(str string) *Session {
 	session.statement.Select(str)
@@ -109,6 +91,12 @@ func (session *Session) Cols(columns ...string) *Session {
 // AllCols ask all columns
 func (session *Session) AllCols() *Session {
 	session.statement.AllCols()
+	return session
+}
+
+// AllCols ask all columns
+func (session *Session) Omit(columns ...string) *Session {
+	session.statement.Omit(columns...)
 	return session
 }
 
@@ -133,12 +121,6 @@ func (session *Session) UseBool(columns ...string) *Session {
 // but distinct will not provide id
 func (session *Session) Distinct(columns ...string) *Session {
 	session.statement.Distinct(columns...)
-	return session
-}
-
-// Omit Only not use the parameters as select or update columns
-func (session *Session) Omit(columns ...string) *Session {
-	session.statement.Omit(columns...)
 	return session
 }
 

@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	sdkhttpclient "github.com/grafana/grafana-plugin-sdk-go/backend/httpclient"
+	sdkproxy "github.com/grafana/grafana-plugin-sdk-go/backend/proxy"
 
 	"github.com/grafana/grafana/pkg/components/simplejson"
 	"github.com/grafana/grafana/pkg/infra/db"
@@ -20,10 +21,16 @@ import (
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/datasources"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
+	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginstore"
 	"github.com/grafana/grafana/pkg/services/quota"
 	"github.com/grafana/grafana/pkg/services/secrets"
 	"github.com/grafana/grafana/pkg/services/secrets/kvstore"
 	"github.com/grafana/grafana/pkg/setting"
+)
+
+const (
+	maxDatasourceNameLen = 190
+	maxDatasourceUrlLen  = 255
 )
 
 type Service struct {
@@ -36,6 +43,7 @@ type Service struct {
 	ac                 accesscontrol.AccessControl
 	logger             log.Logger
 	db                 db.DB
+	pluginStore        pluginstore.Store
 
 	ptc proxyTransportCache
 }
@@ -53,7 +61,7 @@ type cachedRoundTripper struct {
 func ProvideService(
 	db db.DB, secretsService secrets.Service, secretsStore kvstore.SecretsKVStore, cfg *setting.Cfg,
 	features featuremgmt.FeatureToggles, ac accesscontrol.AccessControl, datasourcePermissionsService accesscontrol.DatasourcePermissionsService,
-	quotaService quota.Service,
+	quotaService quota.Service, pluginStore pluginstore.Store,
 ) (*Service, error) {
 	dslogger := log.New("datasources")
 	store := &SqlStore{db: db, logger: dslogger}
@@ -70,6 +78,7 @@ func ProvideService(
 		ac:                 ac,
 		logger:             dslogger,
 		db:                 db,
+		pluginStore:        pluginStore,
 	}
 
 	ac.RegisterScopeAttributeResolver(NewNameScopeResolver(store))
@@ -97,7 +106,7 @@ func (s *Service) Usage(ctx context.Context, scopeParams *quota.ScopeParameters)
 // DataSourceRetriever interface for retrieving a datasource.
 type DataSourceRetriever interface {
 	// GetDataSource gets a datasource.
-	GetDataSource(ctx context.Context, query *datasources.GetDataSourceQuery) error
+	GetDataSource(ctx context.Context, query *datasources.GetDataSourceQuery) (*datasources.DataSource, error)
 }
 
 // NewNameScopeResolver provides an ScopeAttributeResolver able to
@@ -114,12 +123,13 @@ func NewNameScopeResolver(db DataSourceRetriever) (string, accesscontrol.ScopeAt
 			return nil, accesscontrol.ErrInvalidScope
 		}
 
-		query := datasources.GetDataSourceQuery{Name: dsName, OrgId: orgID}
-		if err := db.GetDataSource(ctx, &query); err != nil {
+		query := datasources.GetDataSourceQuery{Name: dsName, OrgID: orgID}
+		dataSource, err := db.GetDataSource(ctx, &query)
+		if err != nil {
 			return nil, err
 		}
 
-		return []string{datasources.ScopeProvider.GetResourceScopeUID(query.Result.Uid)}, nil
+		return []string{datasources.ScopeProvider.GetResourceScopeUID(dataSource.UID)}, nil
 	})
 }
 
@@ -142,37 +152,65 @@ func NewIDScopeResolver(db DataSourceRetriever) (string, accesscontrol.ScopeAttr
 			return nil, accesscontrol.ErrInvalidScope
 		}
 
-		query := datasources.GetDataSourceQuery{Id: dsID, OrgId: orgID}
-		if err := db.GetDataSource(ctx, &query); err != nil {
+		query := datasources.GetDataSourceQuery{ID: dsID, OrgID: orgID}
+		dataSource, err := db.GetDataSource(ctx, &query)
+		if err != nil {
 			return nil, err
 		}
 
-		return []string{datasources.ScopeProvider.GetResourceScopeUID(query.Result.Uid)}, nil
+		return []string{datasources.ScopeProvider.GetResourceScopeUID(dataSource.UID)}, nil
 	})
 }
 
-func (s *Service) GetDataSource(ctx context.Context, query *datasources.GetDataSourceQuery) error {
+func (s *Service) GetDataSource(ctx context.Context, query *datasources.GetDataSourceQuery) (*datasources.DataSource, error) {
 	return s.SQLStore.GetDataSource(ctx, query)
 }
 
-func (s *Service) GetDataSources(ctx context.Context, query *datasources.GetDataSourcesQuery) error {
+func (s *Service) GetDataSources(ctx context.Context, query *datasources.GetDataSourcesQuery) ([]*datasources.DataSource, error) {
 	return s.SQLStore.GetDataSources(ctx, query)
 }
 
-func (s *Service) GetAllDataSources(ctx context.Context, query *datasources.GetAllDataSourcesQuery) error {
+func (s *Service) GetAllDataSources(ctx context.Context, query *datasources.GetAllDataSourcesQuery) (res []*datasources.DataSource, err error) {
 	return s.SQLStore.GetAllDataSources(ctx, query)
 }
 
-func (s *Service) GetDataSourcesByType(ctx context.Context, query *datasources.GetDataSourcesByTypeQuery) error {
+func (s *Service) GetDataSourcesByType(ctx context.Context, query *datasources.GetDataSourcesByTypeQuery) ([]*datasources.DataSource, error) {
+	if query.AliasIDs == nil {
+		// Populate alias IDs from plugin store
+		p, found := s.pluginStore.Plugin(ctx, query.Type)
+		if !found {
+			return nil, fmt.Errorf("plugin %s not found", query.Type)
+		}
+		query.AliasIDs = p.AliasIDs
+	}
 	return s.SQLStore.GetDataSourcesByType(ctx, query)
 }
 
-func (s *Service) AddDataSource(ctx context.Context, cmd *datasources.AddDataSourceCommand) error {
-	return s.db.InTransaction(ctx, func(ctx context.Context) error {
+func (s *Service) AddDataSource(ctx context.Context, cmd *datasources.AddDataSourceCommand) (*datasources.DataSource, error) {
+	dataSources, err := s.SQLStore.GetDataSources(ctx, &datasources.GetDataSourcesQuery{OrgID: cmd.OrgID})
+	if err != nil {
+		return nil, err
+	}
+
+	// Set the first created data source as default
+	if len(dataSources) == 0 {
+		cmd.IsDefault = true
+	}
+
+	if cmd.Name == "" {
+		cmd.Name = getAvailableName(cmd.Type, dataSources)
+	}
+
+	if err := validateFields(cmd.Name, cmd.URL); err != nil {
+		return nil, err
+	}
+
+	var dataSource *datasources.DataSource
+	return dataSource, s.db.InTransaction(ctx, func(ctx context.Context) error {
 		var err error
 
 		cmd.EncryptedSecureJsonData = make(map[string][]byte)
-		if !s.features.IsEnabled(featuremgmt.FlagDisableSecretsCompatibility) {
+		if !s.features.IsEnabled(ctx, featuremgmt.FlagDisableSecretsCompatibility) {
 			cmd.EncryptedSecureJsonData, err = s.SecretsService.EncryptJsonData(ctx, cmd.SecureJsonData, secrets.WithoutScope())
 			if err != nil {
 				return err
@@ -185,33 +223,47 @@ func (s *Service) AddDataSource(ctx context.Context, cmd *datasources.AddDataSou
 				return err
 			}
 
-			return s.SecretsStore.Set(ctx, cmd.OrgId, cmd.Name, kvstore.DataSourceSecretType, string(secret))
+			return s.SecretsStore.Set(ctx, cmd.OrgID, cmd.Name, kvstore.DataSourceSecretType, string(secret))
 		}
 
-		if err := s.SQLStore.AddDataSource(ctx, cmd); err != nil {
+		dataSource, err = s.SQLStore.AddDataSource(ctx, cmd)
+		if err != nil {
 			return err
 		}
 
-		if !s.ac.IsDisabled() {
-			// This belongs in Data source permissions, and we probably want
-			// to do this with a hook in the store and rollback on fail.
-			// We can't use events, because there's no way to communicate
-			// failure, and we want "not being able to set default perms"
-			// to fail the creation.
-			permissions := []accesscontrol.SetResourcePermissionCommand{
-				{BuiltinRole: "Viewer", Permission: "Query"},
-				{BuiltinRole: "Editor", Permission: "Query"},
-			}
-			if cmd.UserId != 0 {
-				permissions = append(permissions, accesscontrol.SetResourcePermissionCommand{UserID: cmd.UserId, Permission: "Edit"})
-			}
-			if _, err := s.permissionsService.SetPermissions(ctx, cmd.OrgId, cmd.Result.Uid, permissions...); err != nil {
-				return err
-			}
+		// This belongs in Data source permissions, and we probably want
+		// to do this with a hook in the store and rollback on fail.
+		// We can't use events, because there's no way to communicate
+		// failure, and we want "not being able to set default perms"
+		// to fail the creation.
+		permissions := []accesscontrol.SetResourcePermissionCommand{
+			{BuiltinRole: "Viewer", Permission: "Query"},
+			{BuiltinRole: "Editor", Permission: "Query"},
 		}
-
-		return nil
+		if cmd.UserID != 0 {
+			permissions = append(permissions, accesscontrol.SetResourcePermissionCommand{UserID: cmd.UserID, Permission: "Admin"})
+		}
+		_, err = s.permissionsService.SetPermissions(ctx, cmd.OrgID, dataSource.UID, permissions...)
+		return err
 	})
+}
+
+// getAvailableName finds the first available name for a datasource of the given type.
+func getAvailableName(dsType string, dataSources []*datasources.DataSource) string {
+	dsNames := make(map[string]bool)
+	for _, ds := range dataSources {
+		dsNames[strings.ToLower(ds.Name)] = true
+	}
+
+	name := dsType
+	currentDigit := 0
+
+	for dsNames[strings.ToLower(name)] {
+		currentDigit++
+		name = fmt.Sprintf("%s-%d", dsType, currentDigit)
+	}
+
+	return name
 }
 
 func (s *Service) DeleteDataSource(ctx context.Context, cmd *datasources.DeleteDataSourceCommand) error {
@@ -220,64 +272,74 @@ func (s *Service) DeleteDataSource(ctx context.Context, cmd *datasources.DeleteD
 			return s.SecretsStore.Del(ctx, cmd.OrgID, cmd.Name, kvstore.DataSourceSecretType)
 		}
 
-		return s.SQLStore.DeleteDataSource(ctx, cmd)
+		if err := s.SQLStore.DeleteDataSource(ctx, cmd); err != nil {
+			return err
+		}
+
+		return s.permissionsService.DeleteResourcePermissions(ctx, cmd.OrgID, cmd.UID)
 	})
 }
 
-func (s *Service) UpdateDataSource(ctx context.Context, cmd *datasources.UpdateDataSourceCommand) error {
-	return s.db.InTransaction(ctx, func(ctx context.Context) error {
+func (s *Service) UpdateDataSource(ctx context.Context, cmd *datasources.UpdateDataSourceCommand) (*datasources.DataSource, error) {
+	var dataSource *datasources.DataSource
+
+	if err := validateFields(cmd.Name, cmd.URL); err != nil {
+		return dataSource, err
+	}
+
+	return dataSource, s.db.InTransaction(ctx, func(ctx context.Context) error {
 		var err error
 
 		query := &datasources.GetDataSourceQuery{
-			Id:    cmd.Id,
-			OrgId: cmd.OrgId,
+			ID:    cmd.ID,
+			OrgID: cmd.OrgID,
 		}
-		err = s.SQLStore.GetDataSource(ctx, query)
+		dataSource, err = s.SQLStore.GetDataSource(ctx, query)
 		if err != nil {
 			return err
 		}
 
-		err = s.fillWithSecureJSONData(ctx, cmd, query.Result)
+		if cmd.Name != "" && cmd.Name != dataSource.Name {
+			query := &datasources.GetDataSourceQuery{
+				Name:  cmd.Name,
+				OrgID: cmd.OrgID,
+			}
+			exist, err := s.SQLStore.GetDataSource(ctx, query)
+			if exist != nil {
+				return datasources.ErrDataSourceNameExists
+			}
+
+			if err != nil && !errors.Is(err, datasources.ErrDataSourceNotFound) {
+				return err
+			}
+		}
+
+		err = s.fillWithSecureJSONData(ctx, cmd, dataSource)
 		if err != nil {
 			return err
 		}
 
-		if cmd.OrgId > 0 && cmd.Name != "" {
+		if cmd.OrgID > 0 && cmd.Name != "" {
 			cmd.UpdateSecretFn = func() error {
 				secret, err := json.Marshal(cmd.SecureJsonData)
 				if err != nil {
 					return err
 				}
 
-				if query.Result.Name != cmd.Name {
-					err := s.SecretsStore.Rename(ctx, cmd.OrgId, query.Result.Name, kvstore.DataSourceSecretType, cmd.Name)
+				if dataSource.Name != cmd.Name {
+					err := s.SecretsStore.Rename(ctx, cmd.OrgID, dataSource.Name, kvstore.DataSourceSecretType, cmd.Name)
 					if err != nil {
 						return err
 					}
 				}
 
-				return s.SecretsStore.Set(ctx, cmd.OrgId, cmd.Name, kvstore.DataSourceSecretType, string(secret))
+				return s.SecretsStore.Set(ctx, cmd.OrgID, cmd.Name, kvstore.DataSourceSecretType, string(secret))
 			}
 		}
 
-		return s.SQLStore.UpdateDataSource(ctx, cmd)
+		dataSource, err = s.SQLStore.UpdateDataSource(ctx, cmd)
+		return err
 	})
-}
-
-func (s *Service) GetDefaultDataSource(ctx context.Context, query *datasources.GetDefaultDataSourceQuery) error {
-	return s.SQLStore.GetDefaultDataSource(ctx, query)
-}
-
-func (s *Service) GetHTTPClient(ctx context.Context, ds *datasources.DataSource, provider httpclient.Provider) (*http.Client, error) {
-	transport, err := s.GetHTTPTransport(ctx, ds, provider)
-	if err != nil {
-		return nil, err
-	}
-
-	return &http.Client{
-		Timeout:   s.getTimeout(ds),
-		Transport: transport,
-	}, nil
 }
 
 func (s *Service) GetHTTPTransport(ctx context.Context, ds *datasources.DataSource, provider httpclient.Provider,
@@ -285,7 +347,7 @@ func (s *Service) GetHTTPTransport(ctx context.Context, ds *datasources.DataSour
 	s.ptc.Lock()
 	defer s.ptc.Unlock()
 
-	if t, present := s.ptc.cache[ds.Id]; present && ds.Updated.Equal(t.updated) {
+	if t, present := s.ptc.cache[ds.ID]; present && ds.Updated.Equal(t.updated) {
 		return t.roundTripper, nil
 	}
 
@@ -301,7 +363,7 @@ func (s *Service) GetHTTPTransport(ctx context.Context, ds *datasources.DataSour
 		return nil, err
 	}
 
-	s.ptc.cache[ds.Id] = cachedRoundTripper{
+	s.ptc.cache[ds.ID] = cachedRoundTripper{
 		roundTripper: rt,
 		updated:      ds.Updated,
 	}
@@ -309,17 +371,9 @@ func (s *Service) GetHTTPTransport(ctx context.Context, ds *datasources.DataSour
 	return rt, nil
 }
 
-func (s *Service) GetTLSConfig(ctx context.Context, ds *datasources.DataSource, httpClientProvider httpclient.Provider) (*tls.Config, error) {
-	opts, err := s.httpClientOptions(ctx, ds)
-	if err != nil {
-		return nil, err
-	}
-	return httpClientProvider.GetTLSConfig(*opts)
-}
-
 func (s *Service) DecryptedValues(ctx context.Context, ds *datasources.DataSource) (map[string]string, error) {
 	decryptedValues := make(map[string]string)
-	secret, exist, err := s.SecretsStore.Get(ctx, ds.OrgId, ds.Name, kvstore.DataSourceSecretType)
+	secret, exist, err := s.SecretsStore.Get(ctx, ds.OrgID, ds.Name, kvstore.DataSourceSecretType)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +381,7 @@ func (s *Service) DecryptedValues(ctx context.Context, ds *datasources.DataSourc
 	if exist {
 		err = json.Unmarshal([]byte(secret), &decryptedValues)
 		if err != nil {
-			s.logger.Debug("failed to unmarshal secret value, using legacy secrets", "err", err)
+			s.logger.Debug("Failed to unmarshal secret value, using legacy secrets", "err", err)
 		}
 	}
 
@@ -405,17 +459,23 @@ func (s *Service) httpClientOptions(ctx context.Context, ds *datasources.DataSou
 
 	opts := &sdkhttpclient.Options{
 		Timeouts: timeouts,
-		Headers:  s.getCustomHeaders(ds.JsonData, decryptedValues),
+		Header:   s.getCustomHeaders(ds.JsonData, decryptedValues),
 		Labels: map[string]string{
 			"datasource_type": ds.Type,
 			"datasource_name": ds.Name,
-			"datasource_uid":  ds.Uid,
+			"datasource_uid":  ds.UID,
 		},
 		TLS: &tlsOptions,
 	}
 
 	if ds.JsonData != nil {
 		opts.CustomOptions = ds.JsonData.MustMap()
+		// allow the plugin sdk to get the json data in JSONDataFromHTTPClientOptions
+		deepJsonDataCopy := make(map[string]any, len(opts.CustomOptions))
+		for k, v := range opts.CustomOptions {
+			deepJsonDataCopy[k] = v
+		}
+		opts.CustomOptions["grafanaData"] = deepJsonDataCopy
 	}
 	if ds.BasicAuth {
 		password, err := s.DecryptedBasicAuthPassword(ctx, ds)
@@ -439,7 +499,40 @@ func (s *Service) httpClientOptions(ctx context.Context, ds *datasources.DataSou
 		}
 	}
 
-	if ds.JsonData != nil && ds.JsonData.Get("sigV4Auth").MustBool(false) && setting.SigV4AuthEnabled {
+	if ds.JsonData != nil && ds.JsonData.Get("enableSecureSocksProxy").MustBool(false) {
+		proxyOpts := &sdkproxy.Options{
+			Enabled: true,
+			Auth: &sdkproxy.AuthOptions{
+				Username: ds.JsonData.Get("secureSocksProxyUsername").MustString(ds.UID),
+			},
+			Timeouts: &sdkproxy.DefaultTimeoutOptions,
+			ClientCfg: &sdkproxy.ClientCfg{
+				ClientCert:    s.cfg.SecureSocksDSProxy.ClientCertFilePath,
+				ClientKey:     s.cfg.SecureSocksDSProxy.ClientKeyFilePath,
+				RootCAs:       s.cfg.SecureSocksDSProxy.RootCAFilePaths,
+				ClientCertVal: s.cfg.SecureSocksDSProxy.ClientCert,
+				ClientKeyVal:  s.cfg.SecureSocksDSProxy.ClientKey,
+				RootCAsVals:   s.cfg.SecureSocksDSProxy.RootCAs,
+				ProxyAddress:  s.cfg.SecureSocksDSProxy.ProxyAddress,
+				ServerName:    s.cfg.SecureSocksDSProxy.ServerName,
+				AllowInsecure: s.cfg.SecureSocksDSProxy.AllowInsecure,
+			},
+		}
+
+		if val, exists, err := s.DecryptedValue(ctx, ds, "secureSocksProxyPassword"); err == nil && exists {
+			proxyOpts.Auth.Password = val
+		}
+		if val, err := ds.JsonData.Get("timeout").Float64(); err == nil {
+			proxyOpts.Timeouts.Timeout = time.Duration(val) * time.Second
+		}
+		if val, err := ds.JsonData.Get("keepAlive").Float64(); err == nil {
+			proxyOpts.Timeouts.KeepAlive = time.Duration(val) * time.Second
+		}
+
+		opts.ProxyOptions = proxyOpts
+	}
+
+	if ds.JsonData != nil && ds.JsonData.Get("sigV4Auth").MustBool(false) && s.cfg.SigV4AuthEnabled {
 		opts.SigV4 = &sdkhttpclient.SigV4Config{
 			Service:       awsServiceNamespace(ds.Type, ds.JsonData),
 			Region:        ds.JsonData.Get("sigV4Region").MustString(),
@@ -539,8 +632,8 @@ func (s *Service) getTimeout(ds *datasources.DataSource) time.Duration {
 
 // getCustomHeaders returns a map with all the to be set headers
 // The map key represents the HeaderName and the value represents this header's value
-func (s *Service) getCustomHeaders(jsonData *simplejson.Json, decryptedValues map[string]string) map[string]string {
-	headers := make(map[string]string)
+func (s *Service) getCustomHeaders(jsonData *simplejson.Json, decryptedValues map[string]string) http.Header {
+	headers := make(http.Header)
 	if jsonData == nil {
 		return headers
 	}
@@ -548,8 +641,8 @@ func (s *Service) getCustomHeaders(jsonData *simplejson.Json, decryptedValues ma
 	index := 0
 	for {
 		index++
-		headerNameSuffix := fmt.Sprintf("httpHeaderName%d", index)
-		headerValueSuffix := fmt.Sprintf("httpHeaderValue%d", index)
+		headerNameSuffix := fmt.Sprintf("%s%d", datasources.CustomHeaderName, index)
+		headerValueSuffix := fmt.Sprintf("%s%d", datasources.CustomHeaderValue, index)
 
 		key := jsonData.Get(headerNameSuffix).MustString()
 		if key == "" {
@@ -560,12 +653,12 @@ func (s *Service) getCustomHeaders(jsonData *simplejson.Json, decryptedValues ma
 		// skip a header with name that corresponds to auth proxy header's name
 		// to make sure that data source proxy isn't used to circumvent auth proxy.
 		// For more context take a look at CVE-2022-35957
-		if s.cfg.AuthProxyEnabled && http.CanonicalHeaderKey(key) == http.CanonicalHeaderKey(s.cfg.AuthProxyHeaderName) {
+		if s.cfg.AuthProxy.Enabled && http.CanonicalHeaderKey(key) == http.CanonicalHeaderKey(s.cfg.AuthProxy.HeaderName) {
 			continue
 		}
 
 		if val, ok := decryptedValues[headerValueSuffix]; ok {
-			headers[key] = val
+			headers.Add(key, val)
 		}
 	}
 
@@ -601,18 +694,32 @@ func (s *Service) fillWithSecureJSONData(ctx context.Context, cmd *datasources.U
 		cmd.SecureJsonData = make(map[string]string)
 	}
 
-	for k, v := range decrypted {
-		if _, ok := cmd.SecureJsonData[k]; !ok {
-			cmd.SecureJsonData[k] = v
+	if !cmd.IgnoreOldSecureJsonData {
+		for k, v := range decrypted {
+			if _, ok := cmd.SecureJsonData[k]; !ok {
+				cmd.SecureJsonData[k] = v
+			}
 		}
 	}
 
 	cmd.EncryptedSecureJsonData = make(map[string][]byte)
-	if !s.features.IsEnabled(featuremgmt.FlagDisableSecretsCompatibility) {
+	if !s.features.IsEnabled(ctx, featuremgmt.FlagDisableSecretsCompatibility) {
 		cmd.EncryptedSecureJsonData, err = s.SecretsService.EncryptJsonData(ctx, cmd.SecureJsonData, secrets.WithoutScope())
 		if err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func validateFields(name, url string) error {
+	if len(name) > maxDatasourceNameLen {
+		return datasources.ErrDataSourceNameInvalid.Errorf("max length is %d", maxDatasourceNameLen)
+	}
+
+	if len(url) > maxDatasourceUrlLen {
+		return datasources.ErrDataSourceURLInvalid.Errorf("max length is %d", maxDatasourceUrlLen)
 	}
 
 	return nil
@@ -637,4 +744,13 @@ func readQuotaConfig(cfg *setting.Cfg) (*quota.Map, error) {
 	limits.Set(globalQuotaTag, cfg.Quota.Global.DataSource)
 	limits.Set(orgQuotaTag, cfg.Quota.Org.DataSource)
 	return limits, nil
+}
+
+// CustomerHeaders returns the custom headers specified in the datasource. The context is used for the decryption operation that might use the store, so consider setting an acceptable timeout for your use case.
+func (s *Service) CustomHeaders(ctx context.Context, ds *datasources.DataSource) (http.Header, error) {
+	values, err := s.SecretsService.DecryptJsonData(ctx, ds.SecureJsonData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get custom headers: %w", err)
+	}
+	return s.getCustomHeaders(ds.JsonData, values), nil
 }

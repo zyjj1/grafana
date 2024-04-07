@@ -11,7 +11,6 @@ import (
 	"github.com/grafana/grafana/pkg/events"
 	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/infra/log"
-	"github.com/grafana/grafana/pkg/models"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/services/quota"
@@ -26,7 +25,9 @@ const MainOrgName = "Main Org."
 
 type store interface {
 	Get(context.Context, int64) (*org.Org, error)
+	// Insert adds a new organization. returns organization id
 	Insert(context.Context, *org.Org) (int64, error)
+	// InsertOrgUser adds a new membership record for a user in an organization. returns membership id
 	InsertOrgUser(context.Context, *org.OrgUser) (int64, error)
 	DeleteUserFromAll(context.Context, int64) error
 	Update(ctx context.Context, cmd *org.UpdateOrgCommand) error
@@ -39,21 +40,22 @@ type store interface {
 	CreateWithMember(context.Context, *org.CreateOrgCommand) (*org.Org, error)
 	AddOrgUser(context.Context, *org.AddOrgUserCommand) error
 	UpdateOrgUser(context.Context, *org.UpdateOrgUserCommand) error
-	GetOrgUsers(context.Context, *org.GetOrgUsersQuery) ([]*org.OrgUserDTO, error)
 	GetByID(context.Context, *org.GetOrgByIDQuery) (*org.Org, error)
 	GetByName(context.Context, *org.GetOrgByNameQuery) (*org.Org, error)
 	SearchOrgUsers(context.Context, *org.SearchOrgUsersQuery) (*org.SearchOrgUsersQueryResult, error)
 	RemoveOrgUser(context.Context, *org.RemoveOrgUserCommand) error
 
 	Count(context.Context, *quota.ScopeParameters) (*quota.Map, error)
+	RegisterDelete(query string)
 }
 
 type sqlStore struct {
 	db      db.DB
 	dialect migrator.Dialect
 	//TODO: moved to service
-	log log.Logger
-	cfg *setting.Cfg
+	log     log.Logger
+	cfg     *setting.Cfg
+	deletes []string
 }
 
 func (ss *sqlStore) Get(ctx context.Context, orgID int64) (*org.Org, error) {
@@ -64,7 +66,7 @@ func (ss *sqlStore) Get(ctx context.Context, orgID int64) (*org.Org, error) {
 			return err
 		}
 		if !has {
-			return org.ErrOrgNotFound
+			return org.ErrOrgNotFound.Errorf("failed to get organization with ID: %d", orgID)
 		}
 		return nil
 	})
@@ -74,23 +76,32 @@ func (ss *sqlStore) Get(ctx context.Context, orgID int64) (*org.Org, error) {
 	return &orga, nil
 }
 
-func (ss *sqlStore) Insert(ctx context.Context, org *org.Org) (int64, error) {
+func (ss *sqlStore) Insert(ctx context.Context, orga *org.Org) (int64, error) {
 	var orgID int64
 	var err error
 	err = ss.db.WithDbSession(ctx, func(sess *db.Session) error {
-		if orgID, err = sess.InsertOne(org); err != nil {
+		if isNameTaken, err := isOrgNameTaken(orga.Name, orga.ID, sess); err != nil {
+			return err
+		} else if isNameTaken {
+			return org.ErrOrgNameTaken
+		}
+
+		if _, err = sess.Insert(orga); err != nil {
 			return err
 		}
-		if org.ID != 0 {
+
+		orgID = orga.ID
+
+		if orga.ID != 0 {
 			// it sets the setval in the sequence
 			if err := ss.dialect.PostInsertId("org", sess.Session); err != nil {
 				return err
 			}
 		}
 		sess.PublishAfterCommit(&events.OrgCreated{
-			Timestamp: org.Created,
-			Id:        org.ID,
-			Name:      org.Name,
+			Timestamp: orga.Created,
+			Id:        orga.ID,
+			Name:      orga.Name,
 		})
 		return nil
 	})
@@ -100,11 +111,11 @@ func (ss *sqlStore) Insert(ctx context.Context, org *org.Org) (int64, error) {
 	return orgID, nil
 }
 
+// InsertOrgUser adds a new membership record for a user in an organization.
 func (ss *sqlStore) InsertOrgUser(ctx context.Context, cmd *org.OrgUser) (int64, error) {
-	var orgID int64
 	var err error
 	err = ss.db.WithDbSession(ctx, func(sess *db.Session) error {
-		if orgID, err = sess.Insert(cmd); err != nil {
+		if _, err = sess.Insert(cmd); err != nil {
 			return err
 		}
 		return nil
@@ -112,7 +123,7 @@ func (ss *sqlStore) InsertOrgUser(ctx context.Context, cmd *org.OrgUser) (int64,
 	if err != nil {
 		return 0, err
 	}
-	return orgID, nil
+	return cmd.ID, nil
 }
 
 func (ss *sqlStore) DeleteUserFromAll(ctx context.Context, userID int64) error {
@@ -144,7 +155,7 @@ func (ss *sqlStore) Update(ctx context.Context, cmd *org.UpdateOrgCommand) error
 		}
 
 		if affectedRows == 0 {
-			return org.ErrOrgNotFound
+			return org.ErrOrgNotFound.Errorf("failed to update organization with ID: %d", cmd.OrgId)
 		}
 
 		sess.PublishAfterCommit(&events.OrgUpdated{
@@ -207,7 +218,7 @@ func (ss *sqlStore) Delete(ctx context.Context, cmd *org.DeleteOrgCommand) error
 		if res, err := sess.Query("SELECT 1 from org WHERE id=?", cmd.ID); err != nil {
 			return err
 		} else if len(res) != 1 {
-			return org.ErrOrgNotFound
+			return org.ErrOrgNotFound.Errorf("failed to delete organisation with ID: %d", cmd.ID)
 		}
 
 		deletes := []string{
@@ -230,7 +241,15 @@ func (ss *sqlStore) Delete(ctx context.Context, cmd *org.DeleteOrgCommand) error
 			"DELETE FROM alert WHERE org_id = ?",
 			"DELETE FROM annotation WHERE org_id = ?",
 			"DELETE FROM kv_store WHERE org_id = ?",
+			"DELETE FROM team WHERE org_id = ?",
+			"DELETE FROM team_member WHERE org_id = ?",
+			"DELETE FROM team_role WHERE org_id = ?",
+			"DELETE FROM user_role WHERE org_id = ?",
+			"DELETE FROM builtin_role WHERE org_id = ?",
 		}
+
+		// Add registered deletes
+		deletes = append(deletes, ss.deletes...)
 
 		for _, sql := range deletes {
 			_, err := sess.Exec(sql, cmd.ID)
@@ -358,13 +377,13 @@ func (ss *sqlStore) AddOrgUser(ctx context.Context, cmd *org.AddOrgUserCommand) 
 		if res, err := sess.Query("SELECT 1 from org_user WHERE org_id=? and user_id=?", cmd.OrgID, usr.ID); err != nil {
 			return err
 		} else if len(res) == 1 {
-			return models.ErrOrgUserAlreadyAdded
+			return org.ErrOrgUserAlreadyAdded
 		}
 
 		if res, err := sess.Query("SELECT 1 from org WHERE id=?", cmd.OrgID); err != nil {
 			return err
 		} else if len(res) != 1 {
-			return org.ErrOrgNotFound
+			return org.ErrOrgNotFound.Errorf("failed to add user to organization with ID: %d", cmd.OrgID)
 		}
 
 		entity := org.OrgUser{
@@ -422,7 +441,7 @@ func (ss *sqlStore) Count(ctx context.Context, scopeParams *quota.ScopeParameter
 		u.Set(tag, r.Count)
 	}
 
-	if scopeParams.OrgID != 0 {
+	if scopeParams != nil && scopeParams.OrgID != 0 {
 		if err := ss.db.WithDbSession(ctx, func(sess *sqlstore.DBSession) error {
 			rawSQL := fmt.Sprintf("SELECT COUNT(*) AS count FROM (SELECT user_id FROM org_user WHERE org_id=? AND user_id IN (SELECT id AS user_id FROM %s WHERE is_service_account=%s)) as subq",
 				ss.db.GetDialect().Quote("user"),
@@ -443,7 +462,7 @@ func (ss *sqlStore) Count(ctx context.Context, scopeParams *quota.ScopeParameter
 		}
 	}
 
-	if scopeParams.UserID != 0 {
+	if scopeParams != nil && scopeParams.UserID != 0 {
 		if err := ss.db.WithDbSession(ctx, func(sess *sqlstore.DBSession) error {
 			// should we exclude service accounts?
 			rawSQL := "SELECT COUNT(*) AS count FROM org_user WHERE user_id=?"
@@ -484,7 +503,7 @@ func (ss *sqlStore) UpdateOrgUser(ctx context.Context, cmd *org.UpdateOrgUserCom
 		}
 
 		if !exists {
-			return models.ErrOrgUserNotFound
+			return org.ErrOrgUserNotFound
 		}
 
 		orgUser.Role = cmd.Role
@@ -506,87 +525,10 @@ func validateOneAdminLeftInOrg(orgID int64, sess *db.Session) error {
 	}
 
 	if len(res) == 0 {
-		return models.ErrLastOrgAdmin
+		return org.ErrLastOrgAdmin
 	}
 
 	return err
-}
-
-func (ss *sqlStore) GetOrgUsers(ctx context.Context, query *org.GetOrgUsersQuery) ([]*org.OrgUserDTO, error) {
-	result := make([]*org.OrgUserDTO, 0)
-	err := ss.db.WithDbSession(ctx, func(dbSession *db.Session) error {
-		sess := dbSession.Table("org_user")
-		sess.Join("INNER", ss.dialect.Quote("user"), fmt.Sprintf("org_user.user_id=%s.id", ss.dialect.Quote("user")))
-
-		whereConditions := make([]string, 0)
-		whereParams := make([]interface{}, 0)
-
-		whereConditions = append(whereConditions, "org_user.org_id = ?")
-		whereParams = append(whereParams, query.OrgID)
-
-		if query.UserID != 0 {
-			whereConditions = append(whereConditions, "org_user.user_id = ?")
-			whereParams = append(whereParams, query.UserID)
-		}
-
-		whereConditions = append(whereConditions, fmt.Sprintf("%s.is_service_account = ?", ss.dialect.Quote("user")))
-		whereParams = append(whereParams, ss.dialect.BooleanStr(false))
-
-		if query.User == nil {
-			ss.log.Warn("Query user not set for filtering.")
-		}
-
-		if !query.DontEnforceAccessControl && !accesscontrol.IsDisabled(ss.cfg) {
-			acFilter, err := accesscontrol.Filter(query.User, "org_user.user_id", "users:id:", accesscontrol.ActionOrgUsersRead)
-			if err != nil {
-				return err
-			}
-			whereConditions = append(whereConditions, acFilter.Where)
-			whereParams = append(whereParams, acFilter.Args...)
-		}
-
-		if query.Query != "" {
-			queryWithWildcards := "%" + query.Query + "%"
-			whereConditions = append(whereConditions, "(email "+ss.dialect.LikeStr()+" ? OR name "+ss.dialect.LikeStr()+" ? OR login "+ss.dialect.LikeStr()+" ?)")
-			whereParams = append(whereParams, queryWithWildcards, queryWithWildcards, queryWithWildcards)
-		}
-
-		if len(whereConditions) > 0 {
-			sess.Where(strings.Join(whereConditions, " AND "), whereParams...)
-		}
-
-		if query.Limit > 0 {
-			sess.Limit(query.Limit, 0)
-		}
-
-		sess.Cols(
-			"org_user.org_id",
-			"org_user.user_id",
-			"user.email",
-			"user.name",
-			"user.login",
-			"org_user.role",
-			"user.last_seen_at",
-			"user.created",
-			"user.updated",
-			"user.is_disabled",
-		)
-		sess.Asc("user.email", "user.login")
-
-		if err := sess.Find(&result); err != nil {
-			return err
-		}
-
-		for _, user := range result {
-			user.LastSeenAtAge = util.GetAgeString(user.LastSeenAt)
-		}
-
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
 }
 
 func (ss *sqlStore) GetByID(ctx context.Context, query *org.GetOrgByIDQuery) (*org.Org, error) {
@@ -598,7 +540,7 @@ func (ss *sqlStore) GetByID(ctx context.Context, query *org.GetOrgByIDQuery) (*o
 		}
 
 		if !exists {
-			return org.ErrOrgNotFound
+			return org.ErrOrgNotFound.Errorf("failed to get org by ID: %d", query.ID)
 		}
 		return nil
 	})
@@ -614,17 +556,27 @@ func (ss *sqlStore) SearchOrgUsers(ctx context.Context, query *org.SearchOrgUser
 	}
 	err := ss.db.WithDbSession(ctx, func(dbSession *db.Session) error {
 		sess := dbSession.Table("org_user")
-		sess.Join("INNER", ss.dialect.Quote("user"), fmt.Sprintf("org_user.user_id=%s.id", ss.dialect.Quote("user")))
+		sess.Join("INNER", []string{ss.dialect.Quote("user"), "u"}, "org_user.user_id=u.id")
 
 		whereConditions := make([]string, 0)
-		whereParams := make([]interface{}, 0)
+		whereParams := make([]any, 0)
 
 		whereConditions = append(whereConditions, "org_user.org_id = ?")
 		whereParams = append(whereParams, query.OrgID)
 
-		whereConditions = append(whereConditions, fmt.Sprintf("%s.is_service_account = %s", ss.dialect.Quote("user"), ss.dialect.BooleanStr(false)))
+		if query.UserID != 0 {
+			whereConditions = append(whereConditions, "org_user.user_id = ?")
+			whereParams = append(whereParams, query.UserID)
+		}
 
-		if !accesscontrol.IsDisabled(ss.cfg) {
+		whereConditions = append(whereConditions, "u.is_service_account = ?")
+		whereParams = append(whereParams, ss.dialect.BooleanStr(false))
+
+		if query.User == nil {
+			ss.log.Warn("Query user not set for filtering.")
+		}
+
+		if !query.DontEnforceAccessControl {
 			acFilter, err := accesscontrol.Filter(query.User, "org_user.user_id", "users:id:", accesscontrol.ActionOrgUsersRead)
 			if err != nil {
 				return err
@@ -651,13 +603,25 @@ func (ss *sqlStore) SearchOrgUsers(ctx context.Context, query *org.SearchOrgUser
 		sess.Cols(
 			"org_user.org_id",
 			"org_user.user_id",
-			"user.email",
-			"user.name",
-			"user.login",
+			"u.email",
+			"u.name",
+			"u.login",
 			"org_user.role",
-			"user.last_seen_at",
+			"u.last_seen_at",
+			"u.created",
+			"u.updated",
+			"u.is_disabled",
 		)
-		sess.Asc("user.email", "user.login")
+
+		if len(query.SortOpts) > 0 {
+			for i := range query.SortOpts {
+				for j := range query.SortOpts[i].Filter {
+					sess.OrderBy(query.SortOpts[i].Filter[j].OrderBy())
+				}
+			}
+		} else {
+			sess.Asc("u.login", "u.email")
+		}
 
 		if err := sess.Find(&result.OrgUsers); err != nil {
 			return err
@@ -666,7 +630,7 @@ func (ss *sqlStore) SearchOrgUsers(ctx context.Context, query *org.SearchOrgUser
 		// get total count
 		orgUser := org.OrgUser{}
 		countSess := dbSession.Table("org_user").
-			Join("INNER", ss.dialect.Quote("user"), fmt.Sprintf("org_user.user_id=%s.id", ss.dialect.Quote("user")))
+			Join("INNER", []string{ss.dialect.Quote("user"), "u"}, "org_user.user_id=u.id")
 
 		if len(whereConditions) > 0 {
 			countSess.Where(strings.Join(whereConditions, " AND "), whereParams...)
@@ -699,7 +663,7 @@ func (ss *sqlStore) GetByName(ctx context.Context, query *org.GetOrgByNameQuery)
 		}
 
 		if !exists {
-			return org.ErrOrgNotFound
+			return org.ErrOrgNotFound.Errorf("failed to get org by name: %s", query.Name)
 		}
 		return nil
 	})
@@ -825,7 +789,7 @@ func deleteUserAccessControl(sess *db.Session, userID int64) error {
 	}
 
 	query := "DELETE FROM permission WHERE role_id IN(? " + strings.Repeat(",?", len(roleIDs)-1) + ")"
-	args := make([]interface{}, 0, len(roleIDs)+1)
+	args := make([]any, 0, len(roleIDs)+1)
 	args = append(args, query)
 	for _, id := range roleIDs {
 		args = append(args, id)
@@ -867,4 +831,9 @@ func removeUserOrg(sess *db.Session, userID int64) error {
 
 	_, err := sess.ID(userID).MustCols("org_id").Update(&user)
 	return err
+}
+
+// RegisterDelete registers a delete query to be executed when an org is deleted, used to delete enterprise data.
+func (ss *sqlStore) RegisterDelete(query string) {
+	ss.deletes = append(ss.deletes, query)
 }

@@ -3,13 +3,13 @@ import React, { ReactNode, useState } from 'react';
 
 import { DataQuery, DataSourceInstanceSettings, GrafanaTheme2 } from '@grafana/data';
 import { selectors } from '@grafana/e2e-selectors';
-import { DataSourcePicker } from '@grafana/runtime';
 import { Icon, Input, FieldValidationMessage, useStyles2 } from '@grafana/ui';
+import { DataSourcePicker } from 'app/features/datasources/components/picker/DataSourcePicker';
 
 export interface Props<TQuery extends DataQuery = DataQuery> {
   query: TQuery;
   queries: TQuery[];
-  disabled?: boolean;
+  hidden?: boolean;
   dataSource: DataSourceInstanceSettings;
   renderExtras?: () => ReactNode;
   onChangeDataSource?: (settings: DataSourceInstanceSettings) => void;
@@ -20,7 +20,7 @@ export interface Props<TQuery extends DataQuery = DataQuery> {
 }
 
 export const QueryEditorRowHeader = <TQuery extends DataQuery>(props: Props<TQuery>) => {
-  const { query, queries, onClick, onChange, collapsedText, renderExtras, disabled } = props;
+  const { query, queries, onChange, collapsedText, renderExtras, hidden } = props;
 
   const styles = useStyles2(getStyles);
   const [isEditing, setIsEditing] = useState<boolean>(false);
@@ -71,9 +71,9 @@ export const QueryEditorRowHeader = <TQuery extends DataQuery>(props: Props<TQue
     onEndEditName(event.currentTarget.value.trim());
   };
 
-  const onKeyDown = (event: React.KeyboardEvent) => {
+  const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') {
-      onEndEditName((event.target as any).value);
+      onEndEditName(event.currentTarget.value);
     }
   };
 
@@ -117,14 +117,10 @@ export const QueryEditorRowHeader = <TQuery extends DataQuery>(props: Props<TQue
         )}
         {renderDataSource(props, styles)}
         {renderExtras && <div className={styles.itemWrapper}>{renderExtras()}</div>}
-        {disabled && <em className={styles.contextInfo}>Disabled</em>}
+        {hidden && <em className={styles.contextInfo}>Hidden</em>}
       </div>
 
-      {collapsedText && (
-        <div className={styles.collapsedText} onClick={onClick}>
-          {collapsedText}
-        </div>
-      )}
+      {collapsedText && <div className={styles.collapsedText}>{collapsedText}</div>}
     </>
   );
 };

@@ -5,20 +5,21 @@ import (
 	"path/filepath"
 	"strings"
 
+	copenapi "cuelang.org/go/encoding/openapi"
 	"github.com/grafana/codejen"
+	"github.com/grafana/grafana/pkg/codegen/generators"
 	"github.com/grafana/grafana/pkg/plugins/pfs"
 )
 
-func PluginGoTypesJenny(root string, inner codejen.OneToOne[*pfs.PluginDecl]) codejen.OneToOne[*pfs.PluginDecl] {
+// TODO this is duplicative of other Go type jennies. Remove it in favor of a better-abstracted version in thema itself
+func PluginGoTypesJenny(root string) codejen.OneToOne[*pfs.PluginDecl] {
 	return &pgoJenny{
-		inner: inner,
-		root:  root,
+		root: root,
 	}
 }
 
 type pgoJenny struct {
-	inner codejen.OneToOne[*pfs.PluginDecl]
-	root  string
+	root string
 }
 
 func (j *pgoJenny) JennyName() string {
@@ -26,21 +27,33 @@ func (j *pgoJenny) JennyName() string {
 }
 
 func (j *pgoJenny) Generate(decl *pfs.PluginDecl) (*codejen.File, error) {
-	b := decl.PluginMeta.Backend
-	if b == nil || !*b || !decl.HasSchema() {
+	hasBackend := decl.PluginMeta.Backend
+	// We skip elasticsearch since we have problems with the generated file.
+	// This is temporal until we migrate to the new system.
+	if hasBackend == nil || !*hasBackend || decl.PluginMeta.Id == "elasticsearch" {
 		return nil, nil
 	}
 
-	f, err := j.inner.Generate(decl)
+	slotname := strings.ToLower(decl.SchemaInterface.Name)
+	byt, err := generators.GenerateTypesGo(decl.CueFile, &generators.GoConfig{
+		Config: &generators.OpenApiConfig{
+			Config: &copenapi.Config{
+				MaxCycleDepth: 10,
+			},
+			IsGroup: decl.SchemaInterface.IsGroup,
+		},
+		PackageName: slotname,
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	pluginfolder := filepath.Base(decl.PluginPath)
-	slotname := strings.ToLower(decl.SchemaInterface.Name())
+	// hardcoded exception for testdata datasource, ONLY because "testdata" is basically a
+	// language-reserved keyword for Go
+	if pluginfolder == "testdata" {
+		pluginfolder = "testdatasource"
+	}
 	filename := fmt.Sprintf("types_%s_gen.go", slotname)
-	f.RelativePath = filepath.Join(j.root, pluginfolder, filename)
-	f.From = append(f.From, j)
-
-	return f, nil
+	return codejen.NewFile(filepath.Join(j.root, pluginfolder, "kinds", slotname, filename), byt, j), nil
 }

@@ -1,50 +1,61 @@
 import { css } from '@emotion/css';
-import React, { FC, Fragment, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { uniqueId } from 'lodash';
+import React, { Fragment, useState } from 'react';
 
-import { GrafanaTheme2, textUtil, urlUtil } from '@grafana/data';
-import { config } from '@grafana/runtime';
-import { Button, ClipboardButton, ConfirmModal, HorizontalGroup, LinkButton, useStyles2 } from '@grafana/ui';
-import { useAppNotification } from 'app/core/copy/appNotification';
-import { contextSrv } from 'app/core/services/context_srv';
-import { AccessControlAction, useDispatch } from 'app/types';
-import { CombinedRule, RulesSource } from 'app/types/unified-alerting';
+import { GrafanaTheme2, textUtil } from '@grafana/data';
+import { config, useReturnToPrevious } from '@grafana/runtime';
+import { Button, ConfirmModal, Dropdown, HorizontalGroup, Icon, LinkButton, Menu, useStyles2 } from '@grafana/ui';
+import { useDispatch } from 'app/types';
+import { CombinedRule, RuleIdentifier, RulesSource } from 'app/types/unified-alerting';
+import { PromAlertingRuleState } from 'app/types/unified-alerting-dto';
 
-import { useIsRuleEditable } from '../../hooks/useIsRuleEditable';
+import { AlertRuleAction, useAlertRuleAbility } from '../../hooks/useAbilities';
 import { useStateHistoryModal } from '../../hooks/useStateHistoryModal';
 import { deleteRuleAction } from '../../state/actions';
 import { getAlertmanagerByUid } from '../../utils/alertmanager';
 import { Annotation } from '../../utils/constants';
 import { getRulesSourceName, isCloudRulesSource, isGrafanaRulesSource } from '../../utils/datasource';
-import { createExploreLink, makeRuleBasedSilenceLink } from '../../utils/misc';
+import {
+  createExploreLink,
+  createShareLink,
+  isLocalDevEnv,
+  isOpenSourceEdition,
+  makeRuleBasedSilenceLink,
+} from '../../utils/misc';
 import * as ruleId from '../../utils/rule-id';
-import { isFederatedRuleGroup, isGrafanaRulerRule } from '../../utils/rules';
+import { isAlertingRule, isFederatedRuleGroup, isGrafanaRulerRule } from '../../utils/rules';
+import { DeclareIncidentButton } from '../bridges/DeclareIncidentButton';
+
+import { RedirectToCloneRule } from './CloneRule';
 
 interface Props {
   rule: CombinedRule;
   rulesSource: RulesSource;
-  isViewMode: boolean;
 }
 
-export const RuleDetailsActionButtons: FC<Props> = ({ rule, rulesSource, isViewMode }) => {
+export const RuleDetailsActionButtons = ({ rule, rulesSource }: Props) => {
   const style = useStyles2(getStyles);
-  const { namespace, group, rulerRule } = rule;
-  const alertId = isGrafanaRulerRule(rule.rulerRule) ? rule.rulerRule.grafana_alert.id ?? '' : '';
-  const { StateHistoryModal, showStateHistoryModal } = useStateHistoryModal(alertId);
+  const { group } = rule;
+  const { StateHistoryModal, showStateHistoryModal } = useStateHistoryModal();
   const dispatch = useDispatch();
-  const location = useLocation();
-  const notifyApp = useAppNotification();
+
+  const setReturnToPrevious = useReturnToPrevious();
 
   const [ruleToDelete, setRuleToDelete] = useState<CombinedRule>();
+  const [redirectToClone, setRedirectToClone] = useState<
+    { identifier: RuleIdentifier; isProvisioned: boolean } | undefined
+  >(undefined);
 
   const alertmanagerSourceName = isGrafanaRulesSource(rulesSource)
     ? rulesSource
     : getAlertmanagerByUid(rulesSource.jsonData.alertmanagerUid)?.name;
 
-  const hasExplorePermission = contextSrv.hasPermission(AccessControlAction.DataSourcesExplore);
+  const [silenceSupported, silenceAllowed] = useAlertRuleAbility(rule, AlertRuleAction.Silence);
+  const [exploreSupported, exploreAllowed] = useAlertRuleAbility(rule, AlertRuleAction.Explore);
 
   const buttons: JSX.Element[] = [];
   const rightButtons: JSX.Element[] = [];
+  const moreActionsButtons: React.ReactElement[] = [];
 
   const deleteRule = () => {
     if (ruleToDelete && ruleToDelete.rulerRule) {
@@ -55,40 +66,30 @@ export const RuleDetailsActionButtons: FC<Props> = ({ rule, rulesSource, isViewM
         ruleToDelete.rulerRule
       );
 
-      dispatch(deleteRuleAction(identifier, { navigateTo: isViewMode ? '/alerting/list' : undefined }));
+      dispatch(deleteRuleAction(identifier, { navigateTo: undefined }));
       setRuleToDelete(undefined);
     }
   };
-  const buildShareUrl = () => {
-    if (isCloudRulesSource(rulesSource)) {
-      const { appUrl, appSubUrl } = config;
-      const baseUrl = appSubUrl !== '' ? `${appUrl}${appSubUrl}/` : config.appUrl;
-      const ruleUrl = `${encodeURIComponent(rulesSource.name)}/${encodeURIComponent(rule.name)}`;
-      return `${baseUrl}alerting/${ruleUrl}/find`;
-    }
-
-    return window.location.href.split('?')[0];
-  };
 
   const isFederated = isFederatedRuleGroup(group);
-  const rulesSourceName = getRulesSourceName(rulesSource);
-  const isProvisioned = isGrafanaRulerRule(rule.rulerRule) && Boolean(rule.rulerRule.grafana_alert.provenance);
 
-  const { isEditable, isRemovable } = useIsRuleEditable(rulesSourceName, rulerRule);
+  const isFiringRule = isAlertingRule(rule.promRule) && rule.promRule.state === PromAlertingRuleState.Firing;
 
-  const returnTo = location.pathname + location.search;
+  const canSilence = silenceSupported && silenceAllowed && alertmanagerSourceName;
+
+  const buildShareUrl = () => createShareLink(rulesSource, rule);
+
   // explore does not support grafana rule queries atm
   // neither do "federated rules"
-  if (isCloudRulesSource(rulesSource) && hasExplorePermission && !isFederated) {
+  if (isCloudRulesSource(rulesSource) && exploreSupported && exploreAllowed && !isFederated) {
     buttons.push(
       <LinkButton
-        className={style.button}
-        size="xs"
+        size="sm"
         key="explore"
         variant="primary"
         icon="chart-line"
-        target="__blank"
-        href={createExploreLink(rulesSource.name, rule.query)}
+        target="_blank"
+        href={createExploreLink(rulesSource, rule.query)}
       >
         See graph
       </LinkButton>
@@ -97,12 +98,11 @@ export const RuleDetailsActionButtons: FC<Props> = ({ rule, rulesSource, isViewM
   if (rule.annotations[Annotation.runbookURL]) {
     buttons.push(
       <LinkButton
-        className={style.button}
-        size="xs"
+        size="sm"
         key="runbook"
         variant="primary"
         icon="book"
-        target="__blank"
+        target="_blank"
         href={textUtil.sanitizeUrl(rule.annotations[Annotation.runbookURL])}
       >
         View runbook
@@ -111,16 +111,19 @@ export const RuleDetailsActionButtons: FC<Props> = ({ rule, rulesSource, isViewM
   }
   if (rule.annotations[Annotation.dashboardUID]) {
     const dashboardUID = rule.annotations[Annotation.dashboardUID];
+    const isReturnToPreviousEnabled = config.featureToggles.returnToPrevious;
     if (dashboardUID) {
       buttons.push(
         <LinkButton
-          className={style.button}
-          size="xs"
+          size="sm"
           key="dashboard"
           variant="primary"
           icon="apps"
-          target="__blank"
+          target={isReturnToPreviousEnabled ? undefined : '_blank'}
           href={`d/${encodeURIComponent(dashboardUID)}`}
+          onClick={() => {
+            setReturnToPrevious(rule.name);
+          }}
         >
           Go to dashboard
         </LinkButton>
@@ -129,13 +132,15 @@ export const RuleDetailsActionButtons: FC<Props> = ({ rule, rulesSource, isViewM
       if (panelId) {
         buttons.push(
           <LinkButton
-            className={style.button}
-            size="xs"
+            size="sm"
             key="panel"
             variant="primary"
             icon="apps"
-            target="__blank"
+            target={isReturnToPreviousEnabled ? undefined : '_blank'}
             href={`d/${encodeURIComponent(dashboardUID)}?viewPanel=${encodeURIComponent(panelId)}`}
+            onClick={() => {
+              setReturnToPrevious(rule.name);
+            }}
           >
             Go to panel
           </LinkButton>
@@ -144,14 +149,13 @@ export const RuleDetailsActionButtons: FC<Props> = ({ rule, rulesSource, isViewM
     }
   }
 
-  if (alertmanagerSourceName && contextSrv.hasAccess(AccessControlAction.AlertingInstanceCreate, contextSrv.isEditor)) {
+  if (canSilence) {
     buttons.push(
       <LinkButton
-        className={style.button}
-        size="xs"
+        size="sm"
         key="silence"
         icon="bell-slash"
-        target="__blank"
+        target="_blank"
         href={makeRuleBasedSilenceLink(alertmanagerSourceName, rule)}
       >
         Silence
@@ -159,10 +163,14 @@ export const RuleDetailsActionButtons: FC<Props> = ({ rule, rulesSource, isViewM
     );
   }
 
-  if (alertId) {
+  if (isGrafanaRulerRule(rule.rulerRule)) {
     buttons.push(
       <Fragment key="history">
-        <Button className={style.button} size="xs" icon="history" onClick={() => showStateHistoryModal()}>
+        <Button
+          size="sm"
+          icon="history"
+          onClick={() => isGrafanaRulerRule(rule.rulerRule) && showStateHistoryModal(rule.rulerRule)}
+        >
           Show state history
         </Button>
         {StateHistoryModal}
@@ -170,62 +178,38 @@ export const RuleDetailsActionButtons: FC<Props> = ({ rule, rulesSource, isViewM
     );
   }
 
-  if (isViewMode) {
-    if (isEditable && rulerRule && !isFederated && !isProvisioned) {
-      const sourceName = getRulesSourceName(rulesSource);
-      const identifier = ruleId.fromRulerRule(sourceName, namespace.name, group.name, rulerRule);
-
-      const editURL = urlUtil.renderUrl(
-        `${config.appSubUrl}/alerting/${encodeURIComponent(ruleId.stringifyIdentifier(identifier))}/edit`,
-        {
-          returnTo,
-        }
-      );
-      rightButtons.push(
-        <ClipboardButton
-          key="copy"
-          icon="copy"
-          onClipboardError={(copiedText) => {
-            notifyApp.error('Error while copying URL', copiedText);
-          }}
-          className={style.button}
-          size="sm"
-          getText={buildShareUrl}
-        >
-          Copy link to rule
-        </ClipboardButton>
-      );
-
-      rightButtons.push(
-        <LinkButton className={style.button} size="xs" key="edit" variant="secondary" icon="pen" href={editURL}>
-          Edit
-        </LinkButton>
-      );
-    }
-
-    if (isRemovable && rulerRule && !isFederated && !isProvisioned) {
-      rightButtons.push(
-        <Button
-          className={style.button}
-          size="xs"
-          type="button"
-          key="delete"
-          variant="secondary"
-          icon="trash-alt"
-          onClick={() => setRuleToDelete(rule)}
-        >
-          Delete
-        </Button>
-      );
-    }
+  if (isFiringRule && shouldShowDeclareIncidentButton()) {
+    buttons.push(
+      <Fragment key="declare-incident">
+        <DeclareIncidentButton title={rule.name} url={buildShareUrl()} />
+      </Fragment>
+    );
   }
 
-  if (buttons.length || rightButtons.length) {
+  if (buttons.length || rightButtons.length || moreActionsButtons.length) {
     return (
       <>
         <div className={style.wrapper}>
           <HorizontalGroup width="auto">{buttons.length ? buttons : <div />}</HorizontalGroup>
-          <HorizontalGroup width="auto">{rightButtons.length ? rightButtons : <div />}</HorizontalGroup>
+          <HorizontalGroup width="auto">
+            {rightButtons.length && rightButtons}
+            {moreActionsButtons.length && (
+              <Dropdown
+                overlay={
+                  <Menu>
+                    {moreActionsButtons.map((action) => (
+                      <React.Fragment key={uniqueId('action_')}>{action}</React.Fragment>
+                    ))}
+                  </Menu>
+                }
+              >
+                <Button variant="secondary" size="sm">
+                  More
+                  <Icon name="angle-down" />
+                </Button>
+              </Dropdown>
+            )}
+          </HorizontalGroup>
         </div>
         {!!ruleToDelete && (
           <ConfirmModal
@@ -238,23 +222,36 @@ export const RuleDetailsActionButtons: FC<Props> = ({ rule, rulesSource, isViewM
             onDismiss={() => setRuleToDelete(undefined)}
           />
         )}
+        {redirectToClone && (
+          <RedirectToCloneRule
+            identifier={redirectToClone.identifier}
+            isProvisioned={redirectToClone.isProvisioned}
+            onDismiss={() => setRedirectToClone(undefined)}
+          />
+        )}
       </>
     );
   }
+
   return null;
 };
 
+/**
+ * Since Incident isn't available as an open-source product we shouldn't show it for Open-Source licenced editions of Grafana.
+ * We should show it in development mode
+ */
+function shouldShowDeclareIncidentButton() {
+  return !isOpenSourceEdition() || isLocalDevEnv();
+}
+
 export const getStyles = (theme: GrafanaTheme2) => ({
   wrapper: css`
-    padding: ${theme.spacing(2)} 0;
+    padding: 0 0 ${theme.spacing(2)} 0;
+    gap: ${theme.spacing(1)};
     display: flex;
     flex-direction: row;
     justify-content: space-between;
     flex-wrap: wrap;
     border-bottom: solid 1px ${theme.colors.border.medium};
-  `,
-  button: css`
-    height: 24px;
-    font-size: ${theme.typography.size.sm};
   `,
 });

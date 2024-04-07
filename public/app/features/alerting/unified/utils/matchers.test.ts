@@ -1,8 +1,16 @@
-import { MatcherOperator } from 'app/plugins/datasource/alertmanager/types';
+import { MatcherOperator, Route } from '../../../../plugins/datasource/alertmanager/types';
 
-import { mockPromAlert } from '../mocks';
-
-import { getMatcherQueryParams, findAlertInstancesWithMatchers, parseQueryParamMatchers } from './matchers';
+import {
+  getMatcherQueryParams,
+  isPromQLStyleMatcher,
+  matcherToObjectMatcher,
+  normalizeMatchers,
+  parseMatcher,
+  parsePromQLStyleMatcher,
+  parseQueryParamMatchers,
+  quoteWithEscape,
+  unquoteWithUnescape,
+} from './matchers';
 
 describe('Unified Alerting matchers', () => {
   describe('getMatcherQueryParams tests', () => {
@@ -38,56 +46,133 @@ describe('Unified Alerting matchers', () => {
     });
   });
 
-  describe('matchLabelsToMatchers', () => {
-    it('should match for equal', () => {
-      const matchers = [{ name: 'foo', value: 'bar', operator: MatcherOperator.equal }];
-      const alerts = [mockPromAlert({ labels: { foo: 'bar' } }), mockPromAlert({ labels: { foo: 'baz' } })];
-      const matchedAlerts = findAlertInstancesWithMatchers(alerts, matchers);
+  describe('normalizeMatchers', () => {
+    const eq = MatcherOperator.equal;
+    const neq = MatcherOperator.notEqual;
 
-      expect(matchedAlerts).toHaveLength(1);
+    it('should work for object_matchers', () => {
+      const route: Route = { object_matchers: [['foo', eq, 'bar']] };
+      expect(normalizeMatchers(route)).toEqual([['foo', eq, 'bar']]);
     });
-
-    it('should match for not equal', () => {
-      const matchers = [{ name: 'foo', value: 'bar', operator: MatcherOperator.notEqual }];
-      const alerts = [mockPromAlert({ labels: { foo: 'bar' } }), mockPromAlert({ labels: { foo: 'baz' } })];
-
-      const matchedAlerts = findAlertInstancesWithMatchers(alerts, matchers);
-      expect(matchedAlerts).toHaveLength(1);
-    });
-
-    it('should match for regex', () => {
-      const matchers = [{ name: 'foo', value: 'b{1}a.*', operator: MatcherOperator.regex }];
-      const alerts = [
-        mockPromAlert({ labels: { foo: 'bbr' } }),
-        mockPromAlert({ labels: { foo: 'aba' } }), // This does not match because the regex is implicitly anchored.
-        mockPromAlert({ labels: { foo: 'ba' } }),
-        mockPromAlert({ labels: { foo: 'bar' } }),
-        mockPromAlert({ labels: { foo: 'baz' } }),
-        mockPromAlert({ labels: { foo: 'bas' } }),
-      ];
-
-      const matchedAlerts = findAlertInstancesWithMatchers(alerts, matchers);
-      expect(matchedAlerts).toHaveLength(4);
-      expect(matchedAlerts.map((instance) => instance.data.matchedInstance.labels.foo)).toEqual([
-        'ba',
-        'bar',
-        'baz',
-        'bas',
+    it('should work for matchers', () => {
+      const route: Route = { matchers: ['foo=bar', 'foo!=bar', 'foo=~bar', 'foo!~bar'] };
+      expect(normalizeMatchers(route)).toEqual([
+        ['foo', MatcherOperator.equal, 'bar'],
+        ['foo', MatcherOperator.notEqual, 'bar'],
+        ['foo', MatcherOperator.regex, 'bar'],
+        ['foo', MatcherOperator.notRegex, 'bar'],
       ]);
     });
-
-    it('should not match regex', () => {
-      const matchers = [{ name: 'foo', value: 'ba{3}', operator: MatcherOperator.notRegex }];
-      const alerts = [
-        mockPromAlert({ labels: { foo: 'bar' } }),
-        mockPromAlert({ labels: { foo: 'baz' } }),
-        mockPromAlert({ labels: { foo: 'baaa' } }),
-        mockPromAlert({ labels: { foo: 'bas' } }),
-      ];
-
-      const matchedAlerts = findAlertInstancesWithMatchers(alerts, matchers);
-      expect(matchedAlerts).toHaveLength(3);
-      expect(matchedAlerts.map((instance) => instance.data.matchedInstance.labels.foo)).toEqual(['bar', 'baz', 'bas']);
+    it('should work for match and match_re', () => {
+      const route: Route = { match: { foo: 'bar' }, match_re: { foo: 'bar' } };
+      expect(normalizeMatchers(route)).toEqual([
+        ['foo', MatcherOperator.regex, 'bar'],
+        ['foo', MatcherOperator.equal, 'bar'],
+      ]);
     });
+    it('should work with PromQL style matchers', () => {
+      const route: Route = {
+        matchers: ['{ foo=bar, baz!=qux }'],
+      };
+      expect(normalizeMatchers(route)).toEqual([
+        ['foo', eq, 'bar'],
+        ['baz', neq, 'qux'],
+      ]);
+    });
+  });
+});
+
+describe('parseMatcher', () => {
+  it('should be able to parse a simple matcher', () => {
+    expect(parseMatcher('foo=bar')).toStrictEqual({ name: 'foo', value: 'bar', isRegex: false, isEqual: true });
+  });
+  it('should throw when parsing PromQL-style matcher', () => {
+    expect(() => parseMatcher('{ foo=bar }')).toThrow();
+  });
+});
+
+describe('quoteWithEscape', () => {
+  const samples: string[][] = [
+    ['bar', '"bar"'],
+    ['b"ar"', '"b\\"ar\\""'],
+    ['b\\ar\\', '"b\\\\ar\\\\"'],
+    ['wa{r}ni$ng!', '"wa{r}ni$ng!"'],
+  ];
+
+  it.each(samples)('should escape and quote %s to %s', (raw, quoted) => {
+    const quotedMatcher = quoteWithEscape(raw);
+    expect(quotedMatcher).toBe(quoted);
+  });
+});
+
+describe('unquoteWithUnescape', () => {
+  const samples: string[][] = [
+    ['bar', 'bar'],
+    ['"bar"', 'bar'],
+    ['"b\\"ar\\""', 'b"ar"'],
+    ['"b\\\\ar\\\\"', 'b\\ar\\'],
+    ['"wa{r}ni$ng!"', 'wa{r}ni$ng!'],
+  ];
+
+  it.each(samples)('should unquote and unescape %s to %s', (quoted, raw) => {
+    const unquotedMatcher = unquoteWithUnescape(quoted);
+    expect(unquotedMatcher).toBe(raw);
+  });
+
+  it('should not unescape unquoted string', () => {
+    const unquoted = unquoteWithUnescape('un\\"quo\\\\ted');
+    expect(unquoted).toBe('un\\"quo\\\\ted');
+  });
+});
+
+describe('isPromQLStyleMatcher', () => {
+  it('should detect promQL style matcher', () => {
+    expect(isPromQLStyleMatcher('{ foo=bar }')).toBe(true);
+    expect(isPromQLStyleMatcher('foo=bar')).toBe(false);
+  });
+});
+
+describe('matcherToObjectMatcher', () => {
+  test.each([
+    { matcher: { name: 'foo', value: 'bar', isRegex: false, isEqual: true }, expected: ['foo', '=', 'bar'] },
+    { matcher: { name: 'foo', value: 'bar', isRegex: true, isEqual: true }, expected: ['foo', '=~', 'bar'] },
+    { matcher: { name: 'foo', value: 'bar', isRegex: true, isEqual: false }, expected: ['foo', '!~', 'bar'] },
+    { matcher: { name: 'foo', value: 'bar', isRegex: false, isEqual: false }, expected: ['foo', '!=', 'bar'] },
+  ])('.matcherToObjectMatcher($matcher)', ({ matcher, expected }) => {
+    expect(matcherToObjectMatcher(matcher)).toStrictEqual(expected);
+  });
+});
+
+describe('parsePromQLStyleMatcher', () => {
+  it('should decode PromQL style matcher', () => {
+    expect(parsePromQLStyleMatcher('{ foo="bar"}')).toStrictEqual([
+      {
+        name: 'foo',
+        value: 'bar',
+        isEqual: true,
+        isRegex: false,
+      },
+    ]);
+  });
+
+  it('should split only on comma when not used as a label key or value', () => {
+    expect(parsePromQLStyleMatcher('{ "key1,key2"="value1,value2"}')).toStrictEqual([
+      {
+        name: 'key1,key2',
+        value: 'value1,value2',
+        isEqual: true,
+        isRegex: false,
+      },
+    ]);
+  });
+
+  it('should remove empty matchers from array', () => {
+    expect(parsePromQLStyleMatcher('{ foo=bar, }')).toStrictEqual([
+      { name: 'foo', value: 'bar', isEqual: true, isRegex: false },
+    ]);
+  });
+
+  it('should throw when not using correct syntax', () => {
+    expect(() => parsePromQLStyleMatcher('foo="bar"')).toThrow();
   });
 });

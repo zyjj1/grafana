@@ -50,7 +50,7 @@ export const VirtualizedSelectMenu = ({ children, maxHeight, options, getValue }
   const [value] = getValue();
 
   const valueIndex = value ? options.findIndex((option: SelectableValue<unknown>) => option.value === value.value) : 0;
-  const initialOffset = valueIndex * VIRTUAL_LIST_ITEM_HEIGHT;
+  const valueYOffset = valueIndex * VIRTUAL_LIST_ITEM_HEIGHT;
 
   if (!Array.isArray(children)) {
     return null;
@@ -60,6 +60,9 @@ export const VirtualizedSelectMenu = ({ children, maxHeight, options, getValue }
   const widthEstimate = longestOption * VIRTUAL_LIST_WIDTH_ESTIMATE_MULTIPLIER;
   const heightEstimate = Math.min(options.length * VIRTUAL_LIST_ITEM_HEIGHT, maxHeight);
 
+  // Try to scroll to keep current value in the middle
+  const scrollOffset = Math.max(0, valueYOffset - heightEstimate / 2);
+
   return (
     <List
       className={styles.menu}
@@ -68,7 +71,7 @@ export const VirtualizedSelectMenu = ({ children, maxHeight, options, getValue }
       aria-label="Select options menu"
       itemCount={children.length}
       itemSize={VIRTUAL_LIST_ITEM_HEIGHT}
-      initialScrollOffset={initialOffset}
+      initialScrollOffset={scrollOffset}
     >
       {({ index, style }) => <div style={{ ...style, overflow: 'hidden' }}>{children[index]}</div>}
     </List>
@@ -95,10 +98,14 @@ export const SelectMenuOptions = ({
   isFocused,
   isSelected,
   renderOptionLabel,
-}: React.PropsWithChildren<SelectMenuOptionProps<any>>) => {
+}: React.PropsWithChildren<SelectMenuOptionProps<unknown>>) => {
   const theme = useTheme2();
   const styles = getSelectStyles(theme);
   const icon = data.icon ? toIconName(data.icon) : undefined;
+  // We are removing onMouseMove and onMouseOver from innerProps because they cause the whole
+  // list to re-render everytime the user hovers over an option. This is a performance issue.
+  // See https://github.com/JedWatson/react-select/issues/3128#issuecomment-451936743
+  const { onMouseMove, onMouseOver, ...rest } = innerProps;
 
   return (
     <div
@@ -109,12 +116,12 @@ export const SelectMenuOptions = ({
         isSelected && styles.optionSelected,
         data.isDisabled && styles.optionDisabled
       )}
-      {...innerProps}
+      {...rest}
       aria-label="Select option"
       title={data.title}
     >
       {icon && <Icon name={icon} className={styles.optionIcon} />}
-      {data.imgUrl && <img className={styles.optionImage} src={data.imgUrl} alt={data.label || data.value} />}
+      {data.imgUrl && <img className={styles.optionImage} src={data.imgUrl} alt={data.label || String(data.value)} />}
       <div className={styles.optionBody}>
         <span>{renderOptionLabel ? renderOptionLabel(data) : children}</span>
         {data.description && <div className={styles.optionDescription}>{data.description}</div>}

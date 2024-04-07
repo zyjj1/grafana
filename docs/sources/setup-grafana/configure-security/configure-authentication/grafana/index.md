@@ -2,8 +2,13 @@
 aliases:
   - ../../../auth/grafana/
 description: Grafana OAuthentication Guide
+labels:
+  products:
+    - enterprise
+    - oss
+menuTitle: Basic auth
 title: Configure Grafana authentication
-weight: 1000
+weight: 200
 ---
 
 ## Configure Grafana authentication
@@ -16,7 +21,7 @@ provider (listed above). There is also options for allowing self sign up.
 
 > The following applies when using Grafana's built in user authentication, LDAP (without Auth proxy) or OAuth integration.
 
-Grafana are using short-lived tokens as a mechanism for verifying authenticated users.
+Grafana uses short-lived tokens as a mechanism for verifying authenticated users.
 These short-lived tokens are rotated each `token_rotation_interval_minutes` for an active authenticated user.
 
 An active authenticated user that gets it token rotated will extend the `login_maximum_inactive_lifetime_duration` time from "now" that Grafana will remember the user.
@@ -53,7 +58,26 @@ api_key_max_seconds_to_live = -1
 
 ### Anonymous authentication
 
-You can make Grafana accessible without any login required by enabling anonymous access in the configuration file. For more information, refer to [Implications of allowing anonymous access to dashboards]({{< relref "../#implications-of-enabling-anonymous-access-to-dashboards" >}}).
+You can make Grafana accessible without any login required by enabling anonymous access in the configuration file. For more information, refer to [Anonymous authentication]({{< relref "../../configure-authentication#anonymous-authentication" >}}).
+
+#### Anonymous devices
+
+The anonymous devices feature enhances the management and monitoring of anonymous access within your Grafana instance. This feature is part of ongoing efforts to provide more control and transparency over anonymous usage.
+
+Users can now view anonymous usage statistics, including the count of devices and users over the last 30 days.
+
+- Go to **Administration -> Users** to access the anonymous devices tab.
+- A new stat for the usage stats page -> Usage & Stats page shows the active anonymous devices last 30 days.
+
+The number of anonymous devices is not limited by default. The configuration option `device_limit` allows you to enforce a limit on the number of anonymous devices. This enables you to have greater control over the usage within your Grafana instance and keep the usage within the limits of your environment. Once the limit is reached, any new devices that try to access Grafana will be denied access.
+
+#### Anonymous users
+
+{{< admonition type="note" >}}
+Anonymous users are charged as active users in Grafana Enterprise
+{{< /admonition >}}
+
+#### Configuration
 
 Example:
 
@@ -69,6 +93,9 @@ org_role = Viewer
 
 # Hide the Grafana version text from the footer and help tooltip for unauthenticated users (default: false)
 hide_version = true
+
+# Setting this limits the number of anonymous devices in your instance. Any new anonymous devices added after the limit has been reached will be denied access.
+device_limit =
 ```
 
 If you change your organization name in the Grafana UI this setting needs to be updated to match the new name.
@@ -85,6 +112,27 @@ To disable basic auth:
 enabled = false
 ```
 
+### Strong password policy
+
+By default, the password policy for all basic auth users is set to a minimum of four characters. You can enable a stronger password policy with the `password_policy` configuration option.
+
+With the `password_policy` option enabled, new and updated passwords must meet the following criteria:
+
+- At least 12 characters
+- At least one uppercase letter
+- At least one lowercase letter
+- At least one number
+- At least one special character
+
+```bash
+[auth.basic]
+password_policy = true
+```
+
+{{% admonition type="note" %}}
+Existing passwords that don't comply with the new password policy will not be impacted until the user updates their password.
+{{% /admonition %}}
+
 ### Disable login form
 
 You can hide the Grafana login form using the below configuration settings.
@@ -96,13 +144,13 @@ disable_login_form = true
 
 ### Automatic OAuth login
 
-Set to true to attempt login with OAuth automatically, skipping the login screen.
-This setting is ignored if multiple OAuth providers are configured.
+Set to true to attempt login with specific OAuth provider automatically, skipping the login screen.
+This setting is ignored if multiple auth providers are configured to use auto login.
 Defaults to `false`.
 
 ```bash
-[auth]
-oauth_auto_login = true
+[auth.generic_oauth]
+auto_login = true
 ```
 
 ### Hide sign-out menu
@@ -116,16 +164,21 @@ disable_signout_menu = true
 
 ### URL redirect after signing out
 
-URL to redirect the user to after signing out from Grafana. This can for example be used to enable signout from oauth provider.
+The URL to redirect the user to after signing out from Grafana can be configured under `[auth]` or under a specific OAuth provider section (for example, `[auth.generic_oauth]`). The URL configured under a specific OAuth provider section takes precedence over the URL configured in `[auth]` section. This can, for example, enable signout from the OAuth provider.
 
 ```bash
+[auth.generic_oauth]
+signout_redirect_url =
+
 [auth]
 signout_redirect_url =
 ```
 
 ### Protected roles
 
-> **Note:** Available in [Grafana Enterprise]({{< relref "../../../../introduction/grafana-enterprise" >}}) and [Grafana Cloud Advanced]({{< relref "../../../../introduction/grafana-cloud" >}}).
+{{% admonition type="note" %}}
+Available in [Grafana Enterprise]({{< relref "../../../../introduction/grafana-enterprise" >}}) and [Grafana Cloud]({{< relref "../../../../introduction/grafana-cloud" >}}).
+{{% /admonition %}}
 
 By default, after you configure an authorization provider, Grafana will adopt existing users into the new authentication scheme. For example, if you have created a user with basic authentication having the login `jsmith@example.com`, then set up SAML authentication where `jsmith@example.com` is an account, the user's authentication type will be changed to SAML if they perform a SAML sign-in.
 

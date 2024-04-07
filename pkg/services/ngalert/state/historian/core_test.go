@@ -4,10 +4,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/grafana/grafana-plugin-sdk-go/data"
 	"github.com/stretchr/testify/require"
 
-	"github.com/grafana/grafana-plugin-sdk-go/data"
-	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/services/ngalert/eval"
 	"github.com/grafana/grafana/pkg/services/ngalert/models"
 	"github.com/grafana/grafana/pkg/services/ngalert/state"
@@ -45,10 +44,14 @@ func TestShouldRecord(t *testing.T) {
 	knownReasons := []string{
 		"",
 		models.StateReasonMissingSeries,
+		models.StateReasonPaused,
+		models.StateReasonUpdated,
+		models.StateReasonRuleDeleted,
 		eval.Error.String(),
 		eval.NoData.String(),
 	}
 
+	// all combinations does not reflect the real transitions that could happen, which is a subset.
 	allCombinations := make([]Transition, 0, len(allStates)*len(allStates)*len(knownReasons)*len(knownReasons))
 	for _, from := range allStates {
 		for _, reasonFrom := range knownReasons {
@@ -61,30 +64,23 @@ func TestShouldRecord(t *testing.T) {
 	}
 
 	negativeTransitions := map[Transition]struct{}{
-		noTransition(eval.Normal, ""):                                {},
-		noTransition(eval.Normal, eval.Error.String()):               {},
-		noTransition(eval.Normal, eval.NoData.String()):              {},
-		noTransition(eval.Normal, models.StateReasonMissingSeries):   {},
-		noTransition(eval.Alerting, ""):                              {},
-		noTransition(eval.Alerting, eval.Error.String()):             {},
-		noTransition(eval.Alerting, eval.NoData.String()):            {},
-		noTransition(eval.Alerting, models.StateReasonMissingSeries): {},
-		noTransition(eval.Pending, ""):                               {},
-		noTransition(eval.Pending, eval.Error.String()):              {},
-		noTransition(eval.Pending, eval.NoData.String()):             {},
-		noTransition(eval.Pending, models.StateReasonMissingSeries):  {},
-		noTransition(eval.NoData, ""):                                {},
-		noTransition(eval.NoData, eval.Error.String()):               {},
-		noTransition(eval.NoData, eval.NoData.String()):              {},
-		noTransition(eval.NoData, models.StateReasonMissingSeries):   {},
-		noTransition(eval.Error, ""):                                 {},
-		noTransition(eval.Error, eval.Error.String()):                {},
-		noTransition(eval.Error, eval.NoData.String()):               {},
-		noTransition(eval.Error, models.StateReasonMissingSeries):    {},
-
 		transition(eval.Normal, "", eval.Normal, models.StateReasonMissingSeries):                   {},
 		transition(eval.Normal, eval.Error.String(), eval.Normal, models.StateReasonMissingSeries):  {},
 		transition(eval.Normal, eval.NoData.String(), eval.Normal, models.StateReasonMissingSeries): {},
+
+		transition(eval.Normal, models.StateReasonPaused, eval.Normal, ""):  {},
+		transition(eval.Normal, models.StateReasonUpdated, eval.Normal, ""): {},
+
+		// these transitions are actually not possible
+		transition(eval.Normal, models.StateReasonRuleDeleted, eval.Normal, models.StateReasonMissingSeries): {},
+		transition(eval.Normal, models.StateReasonPaused, eval.Normal, models.StateReasonMissingSeries):      {},
+		transition(eval.Normal, models.StateReasonUpdated, eval.Normal, models.StateReasonMissingSeries):     {},
+	}
+	// add all transitions from reason X(Y) to X(Y) as negative.
+	for _, s := range allStates {
+		for _, reason := range knownReasons {
+			negativeTransitions[noTransition(s, reason)] = struct{}{}
+		}
 	}
 
 	for _, tc := range allCombinations {
@@ -99,6 +95,58 @@ func TestShouldRecord(t *testing.T) {
 			require.Equal(t, !ok, shouldRecord(trans))
 		})
 	}
+}
+
+func TestShouldRecordAnnotation(t *testing.T) {
+	transition := func(from eval.State, fromReason string, to eval.State, toReason string) state.StateTransition {
+		return state.StateTransition{
+			PreviousState:       from,
+			PreviousStateReason: fromReason,
+			State:               &state.State{State: to, StateReason: toReason},
+		}
+	}
+
+	t.Run("transitions between Normal and Normal(NoData) not recorded", func(t *testing.T) {
+		forward := transition(eval.Normal, "", eval.Normal, models.StateReasonNoData)
+		backward := transition(eval.Normal, models.StateReasonNoData, eval.Normal, "")
+
+		require.False(t, ShouldRecordAnnotation(forward), "Normal -> Normal(NoData) should be false")
+		require.False(t, ShouldRecordAnnotation(backward), "Normal(NoData) -> Normal should be false")
+	})
+
+	t.Run("other Normal transitions involving NoData still recorded", func(t *testing.T) {
+		pauseForward := transition(eval.Normal, models.StateReasonNoData, eval.Normal, models.StateReasonPaused)
+		pauseBackward := transition(eval.Normal, models.StateReasonPaused, eval.Normal, models.StateReasonNoData)
+		errorForward := transition(eval.Normal, models.StateReasonNoData, eval.Normal, models.StateReasonError)
+		errorBackward := transition(eval.Normal, models.StateReasonError, eval.Normal, models.StateReasonNoData)
+		missingSeriesBackward := transition(eval.Normal, models.StateReasonMissingSeries, eval.Normal, models.StateReasonNoData)
+
+		require.True(t, ShouldRecordAnnotation(pauseForward), "Normal(NoData) -> Normal(Paused) should be true")
+		require.True(t, ShouldRecordAnnotation(pauseBackward), "Normal(Paused) -> Normal(NoData) should be true")
+		require.True(t, ShouldRecordAnnotation(errorForward), "Normal(NoData) -> Normal(Error) should be true")
+		require.True(t, ShouldRecordAnnotation(errorBackward), "Normal(Error) -> Normal(NoData) should be true")
+		require.True(t, ShouldRecordAnnotation(missingSeriesBackward), "Normal(MissingSeries) -> Normal(NoData) should be true")
+	})
+
+	t.Run("respects filters in shouldRecord()", func(t *testing.T) {
+		missingSeries := transition(eval.Normal, "", eval.Normal, models.StateReasonMissingSeries)
+		unpause := transition(eval.Normal, models.StateReasonPaused, eval.Normal, "")
+		afterUpdate := transition(eval.Normal, models.StateReasonUpdated, eval.Normal, "")
+
+		require.False(t, ShouldRecordAnnotation(missingSeries), "Normal -> Normal(MissingSeries) should be false")
+		require.False(t, ShouldRecordAnnotation(unpause), "Normal(Paused) -> Normal should be false")
+		require.False(t, ShouldRecordAnnotation(afterUpdate), "Normal(Updated) -> Normal should be false")
+
+		// Smoke test a few basic ones, exhaustive tests for shouldRecord() already exist elsewhere.
+		basicPending := transition(eval.Normal, "", eval.Pending, "")
+		basicAlerting := transition(eval.Pending, "", eval.Alerting, "")
+		basicResolve := transition(eval.Alerting, "", eval.Normal, "")
+		basicError := transition(eval.Normal, "", eval.Error, "")
+		require.True(t, ShouldRecordAnnotation(basicPending), "Normal -> Pending should be true")
+		require.True(t, ShouldRecordAnnotation(basicAlerting), "Pending -> Alerting should be true")
+		require.True(t, ShouldRecordAnnotation(basicResolve), "Alerting -> Normal should be true")
+		require.True(t, ShouldRecordAnnotation(basicError), "Normal -> Error should be true")
+	})
 }
 
 func TestRemovePrivateLabels(t *testing.T) {
@@ -149,72 +197,6 @@ func TestRemovePrivateLabels(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			res := removePrivateLabels(tc.in)
-			require.Equal(t, tc.exp, res)
-		})
-	}
-}
-
-func TestParsePanelKey(t *testing.T) {
-	logger := log.NewNopLogger()
-
-	type testCase struct {
-		name string
-		in   models.AlertRule
-		exp  *panelKey
-	}
-
-	cases := []testCase{
-		{
-			name: "no dash UID",
-			in: models.AlertRule{
-				OrgID: 1,
-				Annotations: map[string]string{
-					models.PanelIDAnnotation: "123",
-				},
-			},
-			exp: nil,
-		},
-		{
-			name: "no panel ID",
-			in: models.AlertRule{
-				OrgID: 1,
-				Annotations: map[string]string{
-					models.DashboardUIDAnnotation: "abcd-uid",
-				},
-			},
-			exp: nil,
-		},
-		{
-			name: "invalid panel ID",
-			in: models.AlertRule{
-				OrgID: 1,
-				Annotations: map[string]string{
-					models.DashboardUIDAnnotation: "abcd-uid",
-					models.PanelIDAnnotation:      "bad-id",
-				},
-			},
-			exp: nil,
-		},
-		{
-			name: "success",
-			in: models.AlertRule{
-				OrgID: 1,
-				Annotations: map[string]string{
-					models.DashboardUIDAnnotation: "abcd-uid",
-					models.PanelIDAnnotation:      "123",
-				},
-			},
-			exp: &panelKey{
-				orgID:   1,
-				dashUID: "abcd-uid",
-				panelID: 123,
-			},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			res := parsePanelKey(&tc.in, logger)
 			require.Equal(t, tc.exp, res)
 		})
 	}

@@ -1,5 +1,5 @@
 import { css } from '@emotion/css';
-import React from 'react';
+import React, { useState } from 'react';
 
 import { GrafanaTheme2 } from '@grafana/data';
 import { Alert, LinkButton, useStyles2 } from '@grafana/ui';
@@ -12,38 +12,31 @@ const getStyles = (theme: GrafanaTheme2) => ({
     flex-direction: row;
     padding: 0;
     justify-content: space-between;
+    align-items: center;
   `,
   alertParagraph: css`
     margin: 0 ${theme.spacing(1)} 0 0;
-    line-height: ${theme.spacing(theme.components.height.md)};
-    color: ${theme.colors.text.primary};
+    line-height: ${theme.spacing(theme.components.height.sm)};
   `,
 });
 
-export enum DestinationPage {
-  dataSources = 'dataSources',
-  connectData = 'connectData',
-}
-
-const destinationLinks = {
-  [DestinationPage.dataSources]: ROUTES.DataSources,
-  [DestinationPage.connectData]: ROUTES.ConnectData,
-};
-
-export function ConnectionsRedirectNotice({ destinationPage }: { destinationPage: DestinationPage }) {
+export function ConnectionsRedirectNotice() {
   const styles = useStyles2(getStyles);
+  const [showNotice, setShowNotice] = useState(true);
 
-  return (
-    <Alert severity="warning" title="Data sources have a new home!">
+  return showNotice ? (
+    <Alert severity="info" title="" onRemove={() => setShowNotice(false)}>
       <div className={styles.alertContent}>
         <p className={styles.alertParagraph}>
-          You can discover new data sources or manage existing ones in the new Connections section, accessible from the
-          left-hand navigation, or click the button here.
+          Data sources have a new home! You can discover new data sources or manage existing ones in the Connections
+          page, accessible from the main menu.
         </p>
-        <LinkButton aria-label="Link to Connections" icon="link" href={destinationLinks[destinationPage]}>
-          Connections
+        <LinkButton aria-label="Link to Connections" icon="arrow-right" href={ROUTES.DataSources} fill="text">
+          Go to connections
         </LinkButton>
       </div>
     </Alert>
+  ) : (
+    <></>
   );
 }

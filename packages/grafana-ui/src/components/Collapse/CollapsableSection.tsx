@@ -4,9 +4,10 @@ import React, { ReactNode, useRef, useState } from 'react';
 
 import { GrafanaTheme2 } from '@grafana/data';
 
-import { Icon, Spinner } from '..';
 import { useStyles2 } from '../../themes';
 import { getFocusStyles } from '../../themes/mixins';
+import { Icon } from '../Icon/Icon';
+import { Spinner } from '../Spinner/Spinner';
 
 export interface Props {
   label: ReactNode;
@@ -54,8 +55,12 @@ export const CollapsableSection = ({
 
   return (
     <>
+      {/* disabling the a11y rules here as the button handles keyboard interactions */}
+      {/* this is just to provide a better experience for mouse users */}
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
       <div onClick={onClick} className={cx(styles.header, className)}>
         <button
+          type="button"
           id={`collapse-button-${id}`}
           className={styles.button}
           onClick={onClick}

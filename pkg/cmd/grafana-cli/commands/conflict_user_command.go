@@ -27,12 +27,13 @@ import (
 	"github.com/grafana/grafana/pkg/services/sqlstore"
 	"github.com/grafana/grafana/pkg/services/sqlstore/migrations"
 	"github.com/grafana/grafana/pkg/services/sqlstore/migrator"
+	"github.com/grafana/grafana/pkg/services/supportbundles/supportbundlestest"
 	"github.com/grafana/grafana/pkg/services/user"
 	"github.com/grafana/grafana/pkg/services/user/userimpl"
 	"github.com/grafana/grafana/pkg/setting"
 )
 
-func initConflictCfg(cmd *utils.ContextCommandLine) (*setting.Cfg, error) {
+func initConflictCfg(cmd *utils.ContextCommandLine) (*setting.Cfg, featuremgmt.FeatureToggles, error) {
 	configOptions := strings.Split(cmd.String("configOverrides"), " ")
 	configOptions = append(configOptions, cmd.Args().Slice()...)
 	cfg, err := setting.NewCfgFromArgs(setting.CommandLineArgs{
@@ -42,17 +43,19 @@ func initConflictCfg(cmd *utils.ContextCommandLine) (*setting.Cfg, error) {
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return cfg, nil
+
+	features, err := featuremgmt.ProvideManagerService(cfg)
+	return cfg, features, err
 }
 
 func initializeConflictResolver(cmd *utils.ContextCommandLine, f Formatter, ctx *cli.Context) (*ConflictResolver, error) {
-	cfg, err := initConflictCfg(cmd)
+	cfg, features, err := initConflictCfg(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("%v: %w", "failed to load configuration", err)
 	}
-	s, err := getSqlStore(cfg)
+	s, err := getSqlStore(cfg, features)
 	if err != nil {
 		return nil, fmt.Errorf("%v: %w", "failed to get to sql", err)
 	}
@@ -61,16 +64,12 @@ func initializeConflictResolver(cmd *utils.ContextCommandLine, f Formatter, ctx 
 		return nil, fmt.Errorf("%v: %w", "failed to get users with conflicting logins", err)
 	}
 	quotaService := quotaimpl.ProvideService(s, cfg)
-	userService, err := userimpl.ProvideService(s, nil, cfg, nil, nil, quotaService)
+	userService, err := userimpl.ProvideService(s, nil, cfg, nil, nil, quotaService, supportbundlestest.NewFakeBundleService())
 	if err != nil {
 		return nil, fmt.Errorf("%v: %w", "failed to get user service", err)
 	}
 	routing := routing.ProvideRegister()
-	featMgmt, err := featuremgmt.ProvideManagerService(cfg, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%v: %w", "failed to get feature management service", err)
-	}
-	acService, err := acimpl.ProvideService(cfg, s, routing, nil, nil, featMgmt)
+	acService, err := acimpl.ProvideService(cfg, s, routing, nil, nil, features)
 	if err != nil {
 		return nil, fmt.Errorf("%v: %w", "failed to get access control", err)
 	}
@@ -79,13 +78,18 @@ func initializeConflictResolver(cmd *utils.ContextCommandLine, f Formatter, ctx 
 	return &resolver, nil
 }
 
-func getSqlStore(cfg *setting.Cfg) (*sqlstore.SQLStore, error) {
-	tracer, err := tracing.ProvideService(cfg)
+func getSqlStore(cfg *setting.Cfg, features featuremgmt.FeatureToggles) (*sqlstore.SQLStore, error) {
+	tracingCfg, err := tracing.ProvideTracingConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("%v: %w", "failed to initialize tracer config", err)
+	}
+
+	tracer, err := tracing.ProvideService(tracingCfg)
 	if err != nil {
 		return nil, fmt.Errorf("%v: %w", "failed to initialize tracer service", err)
 	}
 	bus := bus.ProvideBus(tracer)
-	return sqlstore.ProvideService(cfg, nil, &migrations.OSSMigrations{}, bus, tracer)
+	return sqlstore.ProvideService(cfg, features, &migrations.OSSMigrations{}, bus, tracer)
 }
 
 func runListConflictUsers() func(context *cli.Context) error {
@@ -237,10 +241,10 @@ func generateConflictUsersFile(r *ConflictResolver) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tmpFile.Write([]byte(getDocumentationForFile())); err != nil {
+	if _, err := tmpFile.WriteString(getDocumentationForFile()); err != nil {
 		return nil, err
 	}
-	if _, err := tmpFile.Write([]byte(r.ToStringPresentation())); err != nil {
+	if _, err := tmpFile.WriteString(r.ToStringPresentation()); err != nil {
 		return nil, err
 	}
 	return tmpFile, nil
@@ -279,7 +283,7 @@ func getValidConflictUsers(r *ConflictResolver, b []byte) error {
 			continue
 		}
 
-		entryRow := matchingExpression.Match([]byte(row))
+		entryRow := matchingExpression.MatchString(row)
 		// not an entry row -> is a conflict block row
 		if !entryRow {
 			// check for malformed row
@@ -464,7 +468,7 @@ func (r *ConflictResolver) showChanges() {
 
 // Formatter make it possible for us to write to terminal and to a file
 // with different formats depending on the usecase
-type Formatter func(format string, a ...interface{}) string
+type Formatter func(format string, a ...any) string
 
 func shouldDiscardBlock(seenUsersInBlock map[string]string, block string, user ConflictingUser) bool {
 	// loop through users to see if we should skip this block

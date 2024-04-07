@@ -1,33 +1,27 @@
-import { useGetSingleLocalWithoutDetails } from 'app/features/plugins/admin/state/hooks';
-import { CatalogPlugin } from 'app/features/plugins/admin/types';
 import { Receiver } from 'app/plugins/datasource/alertmanager/types';
 
-import { useGetOnCallIntegrationsQuery } from '../../../api/onCallApi';
+import { onCallApi } from '../../../api/onCallApi';
+import { usePluginBridge } from '../../../hooks/usePluginBridge';
+import { SupportedPlugin } from '../../../types/pluginBridges';
 
 import { isOnCallReceiver } from './onCall/onCall';
-import { AmRouteReceiver, GrafanaAppReceiverEnum, GRAFANA_APP_PLUGIN_IDS, ReceiverWithTypes } from './types';
-
-export const useGetAppIsInstalledAndEnabled = (grafanaAppType: GrafanaAppReceiverEnum) => {
-  // fetches the plugin settings for this Grafana instance
-  const plugin: CatalogPlugin | undefined = useGetSingleLocalWithoutDetails(GRAFANA_APP_PLUGIN_IDS[grafanaAppType]);
-  return plugin?.isInstalled && !plugin?.isDisabled && plugin?.type === 'app';
-};
+import { AmRouteReceiver } from './types';
 
 export const useGetGrafanaReceiverTypeChecker = () => {
-  const isOnCallEnabled = useGetAppIsInstalledAndEnabled(GrafanaAppReceiverEnum.GRAFANA_ONCALL);
-  const { data } = useGetOnCallIntegrationsQuery(undefined, {
+  const { installed: isOnCallEnabled } = usePluginBridge(SupportedPlugin.OnCall);
+  const { data } = onCallApi.useGrafanaOnCallIntegrationsQuery(undefined, {
     skip: !isOnCallEnabled,
   });
-
-  const getGrafanaReceiverType = (receiver: Receiver): GrafanaAppReceiverEnum | undefined => {
+  const getGrafanaReceiverType = (receiver: Receiver): SupportedPlugin | undefined => {
     //CHECK FOR ONCALL PLUGIN
     const onCallIntegrations = data ?? [];
     if (isOnCallEnabled && isOnCallReceiver(receiver, onCallIntegrations)) {
-      return GrafanaAppReceiverEnum.GRAFANA_ONCALL;
+      return SupportedPlugin.OnCall;
     }
     //WE WILL ADD IN HERE IF THERE ARE MORE TYPES TO CHECK
     return undefined;
   };
+
   return getGrafanaReceiverType;
 };
 
@@ -43,14 +37,4 @@ export const useGetAmRouteReceiverWithGrafanaAppTypes = (receivers: Receiver[]) 
   };
 
   return receivers.map(receiverToSelectableContactPointValue);
-};
-
-export const useGetReceiversWithGrafanaAppTypes = (receivers: Receiver[]): ReceiverWithTypes[] => {
-  const getGrafanaReceiverType = useGetGrafanaReceiverTypeChecker();
-  return receivers.map((receiver: Receiver) => {
-    return {
-      ...receiver,
-      grafanaAppReceiverType: getGrafanaReceiverType(receiver),
-    };
-  });
 };

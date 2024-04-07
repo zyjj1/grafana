@@ -16,7 +16,6 @@ import (
 	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/infra/serverlock"
 	"github.com/grafana/grafana/pkg/infra/tracing"
-	"github.com/grafana/grafana/pkg/models"
 	"github.com/grafana/grafana/pkg/services/annotations"
 	"github.com/grafana/grafana/pkg/services/dashboardsnapshots"
 	dashver "github.com/grafana/grafana/pkg/services/dashboardversion"
@@ -103,6 +102,7 @@ func (srv *CleanUpService) clean(ctx context.Context) {
 		{"expire old user invites", srv.expireOldUserInvites},
 		{"delete stale short URLs", srv.deleteStaleShortURLs},
 		{"delete stale query history", srv.deleteStaleQueryHistory},
+		{"expire old email verifications", srv.expireOldVerifications},
 	}
 
 	logger := srv.log.FromContext(ctx)
@@ -135,11 +135,12 @@ func (srv *CleanUpService) cleanUpTmpFiles(ctx context.Context) {
 	folders := []string{
 		srv.Cfg.ImagesDir,
 		srv.Cfg.CSVsDir,
+		srv.Cfg.PDFsDir,
 	}
 
 	for _, f := range folders {
 		ctx, span := srv.tracer.Start(ctx, "delete stale files in temporary directory")
-		span.SetAttributes("directory", f, attribute.Key("directory").String(f))
+		span.SetAttributes(attribute.String("directory", f))
 		srv.cleanUpTmpFolder(ctx, f)
 		span.End()
 	}
@@ -238,9 +239,24 @@ func (srv *CleanUpService) expireOldUserInvites(ctx context.Context) {
 	}
 }
 
+func (srv *CleanUpService) expireOldVerifications(ctx context.Context) {
+	logger := srv.log.FromContext(ctx)
+	maxVerificationLifetime := srv.Cfg.VerificationEmailMaxLifetime
+
+	cmd := tempuser.ExpireTempUsersCommand{
+		OlderThan: time.Now().Add(-maxVerificationLifetime),
+	}
+
+	if err := srv.tempUserService.ExpireOldVerifications(ctx, &cmd); err != nil {
+		logger.Error("Problem expiring email verifications", "error", err.Error())
+	} else {
+		logger.Debug("Expired email verifications", "rows affected", cmd.NumExpired)
+	}
+}
+
 func (srv *CleanUpService) deleteStaleShortURLs(ctx context.Context) {
 	logger := srv.log.FromContext(ctx)
-	cmd := models.DeleteShortUrlCommand{
+	cmd := shorturls.DeleteShortUrlCommand{
 		OlderThan: time.Now().Add(-time.Hour * 24 * 7),
 	}
 	if err := srv.ShortURLService.DeleteStaleShortURLs(ctx, &cmd); err != nil {

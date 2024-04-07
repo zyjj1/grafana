@@ -1,9 +1,9 @@
 import { css, cx } from '@emotion/css';
-import React, { FC } from 'react';
-import { useFormContext, useFieldArray } from 'react-hook-form';
+import React from 'react';
+import { useFormContext, useFieldArray, Controller } from 'react-hook-form';
 
 import { GrafanaTheme2 } from '@grafana/data';
-import { Button, Field, Input, IconButton, InputControl, useStyles2, Select } from '@grafana/ui';
+import { Button, Field, Input, IconButton, useStyles2, Select } from '@grafana/ui';
 import { MatcherOperator } from 'app/plugins/datasource/alertmanager/types';
 
 import { SilenceFormFields } from '../../types/silence-form';
@@ -13,7 +13,7 @@ interface Props {
   className?: string;
 }
 
-const MatchersField: FC<Props> = ({ className }) => {
+const MatchersField = ({ className }: Props) => {
   const styles = useStyles2(getStyles);
   const formApi = useFormContext<SilenceFormFields>();
   const {
@@ -46,7 +46,7 @@ const MatchersField: FC<Props> = ({ className }) => {
                     />
                   </Field>
                   <Field label={'Operator'}>
-                    <InputControl
+                    <Controller
                       control={control}
                       render={({ field: { onChange, ref, ...field } }) => (
                         <Select
@@ -79,7 +79,7 @@ const MatchersField: FC<Props> = ({ className }) => {
                     <IconButton
                       className={styles.removeButton}
                       tooltip="Remove matcher"
-                      name={'trash-alt'}
+                      name="trash-alt"
                       onClick={() => remove(index)}
                     >
                       Remove

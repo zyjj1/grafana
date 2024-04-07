@@ -14,7 +14,10 @@ import { GrafanaTheme, IconName, NavLinkDTO, OrgRole } from '.';
  * @public
  */
 export interface BuildInfo {
+  // This MUST be a semver-ish version string, such as "11.0.0-54321"
   version: string;
+  // Version to show in the UI instead of version
+  versionString: string;
   commit: string;
   env: string;
   edition: GrafanaEdition;
@@ -47,18 +50,6 @@ export interface LicenseInfo {
 }
 
 /**
- * Describes Sentry integration config
- *
- * @public
- */
-export interface SentryConfig {
-  enabled: boolean;
-  dsn: string;
-  customEndpoint: string;
-  sampleRate: number;
-}
-
-/**
  * Describes GrafanaJavascriptAgentConfig integration config
  *
  * @public
@@ -74,17 +65,11 @@ export interface GrafanaJavascriptAgentConfig {
 
 export interface UnifiedAlertingConfig {
   minInterval: string;
+  // will be undefined if alerStateHistory is not enabled
+  alertStateHistoryBackend?: string;
+  // will be undefined if implementation is not "multiple"
+  alertStateHistoryPrimary?: string;
 }
-
-/**
- * Describes the plugins that should be preloaded prior to start Grafana.
- *
- * @public
- */
-export type PreloadPlugin = {
-  path: string;
-  version: string;
-};
 
 /** Supported OAuth services
  *
@@ -106,6 +91,16 @@ export type OAuth =
  */
 export type OAuthSettings = Partial<Record<OAuth, { name: string; icon?: IconName }>>;
 
+/**
+ * Information needed for analytics providers
+ *
+ * @internal
+ */
+export interface AnalyticsSettings {
+  identifier: string;
+  intercomIdentifier?: string;
+}
+
 /** Current user info included in bootData
  *
  * @internal
@@ -113,11 +108,12 @@ export type OAuthSettings = Partial<Record<OAuth, { name: string; icon?: IconNam
 export interface CurrentUserDTO {
   isSignedIn: boolean;
   id: number;
+  uid: string;
   externalUserId: string;
   login: string;
   email: string;
   name: string;
-  lightTheme: boolean;
+  theme: string; // dark | light | system
   orgCount: number;
   orgId: number;
   orgName: string;
@@ -129,6 +125,11 @@ export interface CurrentUserDTO {
   locale: string;
   language: string;
   permissions?: Record<string, boolean>;
+  analytics: AnalyticsSettings;
+  authenticatedBy: string;
+
+  /** @deprecated Use theme instead */
+  lightTheme: boolean;
 }
 
 /** Contains essential user and config info
@@ -139,7 +140,7 @@ export interface BootData {
   user: CurrentUserDTO;
   settings: GrafanaConfig;
   navTree: NavLinkDTO[];
-  themePaths: {
+  assets: {
     light: string;
     dark: string;
   };
@@ -151,7 +152,9 @@ export interface BootData {
  * @internal
  */
 export interface GrafanaConfig {
-  isPublicDashboardView: boolean;
+  publicDashboardAccessToken?: string;
+  publicDashboardsEnabled: boolean;
+  snapshotEnabled: boolean;
   datasources: { [str: string]: DataSourceInstanceSettings };
   panels: { [key: string]: PanelPluginMeta };
   auth: AuthSettings;
@@ -167,15 +170,12 @@ export interface GrafanaConfig {
   allowOrgCreate: boolean;
   disableLoginForm: boolean;
   defaultDatasource: string;
-  alertingEnabled: boolean;
-  alertingErrorOrTimeout: string;
-  alertingNoDataOrNullValues: string;
-  alertingMinInterval: number;
   authProxyEnabled: boolean;
   exploreEnabled: boolean;
   queryHistoryEnabled: boolean;
   helpEnabled: boolean;
   profileEnabled: boolean;
+  newsFeedEnabled: boolean;
   ldapEnabled: boolean;
   sigV4AuthEnabled: boolean;
   azureAuthEnabled: boolean;
@@ -183,6 +183,7 @@ export interface GrafanaConfig {
   autoAssignOrg: boolean;
   verifyEmailEnabled: boolean;
   oauth: OAuthSettings;
+  /** @deprecated always set to true. */
   rbacEnabled: boolean;
   disableUserSignUp: boolean;
   loginHint: string;
@@ -191,16 +192,18 @@ export interface GrafanaConfig {
   viewersCanEdit: boolean;
   editorsCanAdmin: boolean;
   disableSanitizeHtml: boolean;
+  trustedTypesDefaultPolicyEnabled: boolean;
+  cspReportOnlyEnabled: boolean;
   liveEnabled: boolean;
   /** @deprecated Use `theme2` instead. */
   theme: GrafanaTheme;
   theme2: GrafanaTheme2;
-  pluginsToPreload: PreloadPlugin[];
+  anonymousEnabled: boolean;
+  anonymousDeviceLimit: number | undefined;
   featureToggles: FeatureToggles;
   licenseInfo: LicenseInfo;
   http2Enabled: boolean;
   dateFormats?: SystemDateFormatSettings;
-  sentry: SentryConfig;
   grafanaJavascriptAgent: GrafanaJavascriptAgentConfig;
   customTheme?: any;
   geomapDefaultBaseLayer?: MapLayerOptions;
@@ -210,6 +213,8 @@ export interface GrafanaConfig {
   angularSupportEnabled: boolean;
   feedbackLinksEnabled: boolean;
   secretsManagerPluginEnabled: boolean;
+  supportBundlesEnabled: boolean;
+  secureSocksDSProxyEnabled: boolean;
   googleAnalyticsId: string | undefined;
   googleAnalytics4Id: string | undefined;
   googleAnalytics4SendManualPageViews: boolean;
@@ -217,11 +222,56 @@ export interface GrafanaConfig {
   rudderstackDataPlaneUrl: string | undefined;
   rudderstackSdkUrl: string | undefined;
   rudderstackConfigUrl: string | undefined;
+  rudderstackIntegrationsUrl: string | undefined;
+  sqlConnectionLimits: SqlConnectionLimits;
+  sharedWithMeFolderUID?: string;
+  rootFolderUID?: string;
+  localFileSystemAvailable?: boolean;
+  cloudMigrationIsTarget?: boolean;
+  listDashboardScopesEndpoint?: string;
+  listScopesEndpoint?: string;
+
+  // The namespace to use for kubernetes apiserver requests
+  namespace: string;
+
+  /**
+   * Language used in Grafana's UI. This is after the user's preference (or deteceted locale) is resolved to one of
+   * Grafana's supported language.
+   */
+  language: string | undefined;
+}
+
+export interface SqlConnectionLimits {
+  maxOpenConns: number;
+  maxIdleConns: number;
+  connMaxLifetime: number;
 }
 
 export interface AuthSettings {
+  AuthProxyEnableLoginToken?: boolean;
+  // @deprecated -- this is no longer used and will be removed in Grafana 11
   OAuthSkipOrgRoleUpdateSync?: boolean;
+  // @deprecated -- this is no longer used and will be removed in Grafana 11
   SAMLSkipOrgRoleSync?: boolean;
+  // @deprecated -- this is no longer used and will be removed in Grafana 11
   LDAPSkipOrgRoleSync?: boolean;
-  DisableSyncLock?: boolean;
+  // @deprecated -- this is no longer used and will be removed in Grafana 11
+  JWTAuthSkipOrgRoleSync?: boolean;
+  // @deprecated -- this is no longer used and will be removed in Grafana 11
+  GrafanaComSkipOrgRoleSync?: boolean;
+  // @deprecated -- this is no longer used and will be removed in Grafana 11
+  GithubSkipOrgRoleSync?: boolean;
+  // @deprecated -- this is no longer used and will be removed in Grafana 11
+  GitLabSkipOrgRoleSync?: boolean;
+  // @deprecated -- this is no longer used and will be removed in Grafana 11
+  OktaSkipOrgRoleSync?: boolean;
+  // @deprecated -- this is no longer used and will be removed in Grafana 11
+  AzureADSkipOrgRoleSync?: boolean;
+  // @deprecated -- this is no longer used and will be removed in Grafana 11
+  GoogleSkipOrgRoleSync?: boolean;
+  // @deprecated -- this is no longer used and will be removed in Grafana 11
+  GenericOAuthSkipOrgRoleSync?: boolean;
+
+  disableLogin?: boolean;
+  basicAuthStrongPasswordPolicy?: boolean;
 }

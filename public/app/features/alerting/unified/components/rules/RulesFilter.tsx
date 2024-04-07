@@ -1,17 +1,26 @@
-import { css, cx } from '@emotion/css';
-import { debounce } from 'lodash';
-import React, { FormEvent, useState } from 'react';
+import { css } from '@emotion/css';
+import React, { useEffect, useRef, useState } from 'react';
+import { useForm } from 'react-hook-form';
 
 import { DataSourceInstanceSettings, GrafanaTheme2, SelectableValue } from '@grafana/data';
-import { Stack } from '@grafana/experimental';
-import { DataSourcePicker, logInfo } from '@grafana/runtime';
-import { Button, Field, Icon, Input, Label, RadioButtonGroup, Tooltip, useStyles2 } from '@grafana/ui';
+import { Button, Field, Icon, Input, Label, RadioButtonGroup, Stack, Tooltip, useStyles2 } from '@grafana/ui';
+import { DashboardPicker } from 'app/core/components/Select/DashboardPicker';
 import { useQueryParams } from 'app/core/hooks/useQueryParams';
 import { PromAlertingRuleState, PromRuleType } from 'app/types/unified-alerting-dto';
 
-import { LogMessages } from '../../Analytics';
-import { getFiltersFromUrlParams } from '../../utils/misc';
+import {
+  logInfo,
+  LogMessages,
+  trackRulesListViewChange,
+  trackRulesSearchComponentInteraction,
+  trackRulesSearchInputInteraction,
+} from '../../Analytics';
+import { useRulesFilter } from '../../hooks/useFilteredRules';
+import { RuleHealth } from '../../search/rulesSearchParser';
 import { alertStateToReadable } from '../../utils/rules';
+import { HoverCard } from '../HoverCard';
+
+import { MultipleDataSourcePicker } from './MultipleDataSourcePicker';
 
 const ViewOptions: SelectableValue[] = [
   {
@@ -42,171 +51,301 @@ const RuleTypeOptions: SelectableValue[] = [
   },
 ];
 
-const RulesFilter = () => {
+const RuleHealthOptions: SelectableValue[] = [
+  { label: 'Ok', value: RuleHealth.Ok },
+  { label: 'No Data', value: RuleHealth.NoData },
+  { label: 'Error', value: RuleHealth.Error },
+];
+
+interface RulesFilerProps {
+  onFilterCleared?: () => void;
+}
+
+const RuleStateOptions = Object.entries(PromAlertingRuleState).map(([key, value]) => ({
+  label: alertStateToReadable(value),
+  value,
+}));
+
+const RulesFilter = ({ onFilterCleared = () => undefined }: RulesFilerProps) => {
+  const styles = useStyles2(getStyles);
   const [queryParams, setQueryParams] = useQueryParams();
+  const { filterState, hasActiveFilters, searchQuery, setSearchQuery, updateFilters } = useRulesFilter();
+
   // This key is used to force a rerender on the inputs when the filters are cleared
   const [filterKey, setFilterKey] = useState<number>(Math.floor(Math.random() * 100));
   const dataSourceKey = `dataSource-${filterKey}`;
   const queryStringKey = `queryString-${filterKey}`;
 
-  const { dataSource, alertState, queryString, ruleType } = getFiltersFromUrlParams(queryParams);
+  const searchQueryRef = useRef<HTMLInputElement | null>(null);
+  const { handleSubmit, register, setValue } = useForm<{ searchQuery: string }>({ defaultValues: { searchQuery } });
+  const { ref, ...rest } = register('searchQuery');
 
-  const styles = useStyles2(getStyles);
-  const stateOptions = Object.entries(PromAlertingRuleState).map(([key, value]) => ({
-    label: alertStateToReadable(value),
-    value,
-  }));
+  useEffect(() => {
+    setValue('searchQuery', searchQuery);
+  }, [searchQuery, setValue]);
 
-  const handleDataSourceChange = (dataSourceValue: DataSourceInstanceSettings) => {
-    setQueryParams({ dataSource: dataSourceValue.name });
+  const handleDataSourceChange = (dataSourceValue: DataSourceInstanceSettings, action: 'add' | 'remove') => {
+    const dataSourceNames =
+      action === 'add'
+        ? [...filterState.dataSourceNames].concat([dataSourceValue.name])
+        : filterState.dataSourceNames.filter((name) => name !== dataSourceValue.name);
+
+    updateFilters({
+      ...filterState,
+      dataSourceNames,
+    });
+
+    setFilterKey((key) => key + 1);
+    trackRulesSearchComponentInteraction('dataSourceNames');
+  };
+
+  const handleDashboardChange = (dashboardUid: string | undefined) => {
+    updateFilters({ ...filterState, dashboardUid });
+    trackRulesSearchComponentInteraction('dashboardUid');
   };
 
   const clearDataSource = () => {
-    setQueryParams({ dataSource: null });
+    updateFilters({ ...filterState, dataSourceNames: [] });
+    setFilterKey((key) => key + 1);
   };
 
-  const handleQueryStringChange = debounce((e: FormEvent<HTMLInputElement>) => {
-    const target = e.target as HTMLInputElement;
-    setQueryParams({ queryString: target.value || null });
-  }, 600);
-
-  const handleAlertStateChange = (value: string) => {
+  const handleAlertStateChange = (value: PromAlertingRuleState) => {
     logInfo(LogMessages.clickingAlertStateFilters);
-    setQueryParams({ alertState: value });
+    updateFilters({ ...filterState, ruleState: value });
+    trackRulesSearchComponentInteraction('ruleState');
+  };
+
+  const handleRuleTypeChange = (ruleType: PromRuleType) => {
+    updateFilters({ ...filterState, ruleType });
+    trackRulesSearchComponentInteraction('ruleType');
+  };
+
+  const handleRuleHealthChange = (ruleHealth: RuleHealth) => {
+    updateFilters({ ...filterState, ruleHealth });
+    trackRulesSearchComponentInteraction('ruleHealth');
+  };
+
+  const handleClearFiltersClick = () => {
+    setSearchQuery(undefined);
+    onFilterCleared();
+
+    setTimeout(() => setFilterKey(filterKey + 1), 100);
   };
 
   const handleViewChange = (view: string) => {
     setQueryParams({ view });
-  };
-
-  const handleRuleTypeChange = (ruleType: PromRuleType) => {
-    setQueryParams({ ruleType });
-  };
-
-  const handleClearFiltersClick = () => {
-    setQueryParams({
-      alertState: null,
-      queryString: null,
-      dataSource: null,
-      ruleType: null,
-    });
-    setTimeout(() => setFilterKey(filterKey + 1), 100);
+    trackRulesListViewChange({ view });
   };
 
   const searchIcon = <Icon name={'search'} />;
   return (
     <div className={styles.container}>
-      <Field className={styles.inputWidth} label="Search by data source">
-        <DataSourcePicker
-          key={dataSourceKey}
-          alerting
-          noDefault
-          placeholder="All data sources"
-          current={dataSource}
-          onChange={handleDataSourceChange}
-          onClear={clearDataSource}
-        />
-      </Field>
-      <div className={cx(styles.flexRow, styles.spaceBetween)}>
-        <div className={styles.flexRow}>
+      <Stack direction="column" gap={1}>
+        <Stack direction="row" gap={1} wrap="wrap">
           <Field
-            className={styles.rowChild}
+            className={styles.dsPickerContainer}
             label={
-              <Label>
+              <Label htmlFor="data-source-picker">
                 <Stack gap={0.5}>
-                  <span>Search by label</span>
+                  <span>Search by data sources</span>
                   <Tooltip
                     content={
                       <div>
-                        Filter rules and alerts using label querying, ex:
-                        <code>{`{severity="critical", instance=~"cluster-us-.+"}`}</code>
+                        <p>
+                          Data sources containing configured alert rules are Mimir or Loki data sources where alert
+                          rules are stored and evaluated in the data source itself.
+                        </p>
+                        <p>
+                          In these data sources, you can select Manage alerts via Alerting UI to be able to manage these
+                          alert rules in the Grafana UI as well as in the data source where they were configured.
+                        </p>
                       </div>
                     }
                   >
-                    <Icon name="info-circle" size="sm" />
+                    <Icon
+                      id="data-source-picker-inline-help"
+                      name="info-circle"
+                      size="sm"
+                      title="Search by data sources help"
+                    />
                   </Tooltip>
                 </Stack>
               </Label>
             }
           >
-            <Input
-              key={queryStringKey}
-              className={styles.inputWidth}
-              prefix={searchIcon}
-              onChange={handleQueryStringChange}
-              defaultValue={queryString}
-              placeholder="Search"
-              data-testid="search-query-input"
+            <MultipleDataSourcePicker
+              key={dataSourceKey}
+              alerting
+              noDefault
+              placeholder="All data sources"
+              current={filterState.dataSourceNames}
+              onChange={handleDataSourceChange}
+              onClear={clearDataSource}
             />
           </Field>
-          <div className={styles.rowChild}>
+
+          <Field
+            className={styles.dashboardPickerContainer}
+            label={<Label htmlFor="filters-dashboard-picker">Dashboard</Label>}
+          >
+            {/* The key prop is to clear the picker value */}
+            {/* DashboardPicker doesn't do that itself when value is undefined */}
+            <DashboardPicker
+              inputId="filters-dashboard-picker"
+              key={filterState.dashboardUid ? 'dashboard-defined' : 'dashboard-not-defined'}
+              value={filterState.dashboardUid}
+              onChange={(value) => handleDashboardChange(value?.uid)}
+              isClearable
+              cacheOptions
+            />
+          </Field>
+
+          <div>
             <Label>State</Label>
-            <RadioButtonGroup options={stateOptions} value={alertState} onChange={handleAlertStateChange} />
+            <RadioButtonGroup
+              options={RuleStateOptions}
+              value={filterState.ruleState}
+              onChange={handleAlertStateChange}
+            />
           </div>
-          <div className={styles.rowChild}>
+          <div>
             <Label>Rule type</Label>
+            <RadioButtonGroup options={RuleTypeOptions} value={filterState.ruleType} onChange={handleRuleTypeChange} />
+          </div>
+          <div>
+            <Label>Health</Label>
             <RadioButtonGroup
-              options={RuleTypeOptions}
-              value={ruleType as PromRuleType}
-              onChange={handleRuleTypeChange}
+              options={RuleHealthOptions}
+              value={filterState.ruleHealth}
+              onChange={handleRuleHealthChange}
             />
           </div>
-          <div className={styles.rowChild}>
-            <Label>View as</Label>
-            <RadioButtonGroup
-              options={ViewOptions}
-              value={String(queryParams['view'] ?? ViewOptions[0].value)}
-              onChange={handleViewChange}
-            />
-          </div>
-        </div>
-        {(dataSource || alertState || queryString || ruleType) && (
-          <div className={styles.flexRow}>
-            <Button
-              className={styles.clearButton}
-              fullWidth={false}
-              icon="times"
-              variant="secondary"
-              onClick={handleClearFiltersClick}
+        </Stack>
+        <Stack direction="column" gap={1}>
+          <Stack direction="row" gap={1}>
+            <form
+              className={styles.searchInput}
+              onSubmit={handleSubmit((data) => {
+                setSearchQuery(data.searchQuery);
+                searchQueryRef.current?.blur();
+                trackRulesSearchInputInteraction({ oldQuery: searchQuery, newQuery: data.searchQuery });
+              })}
             >
-              Clear filters
-            </Button>
-          </div>
-        )}
-      </div>
+              <Field
+                label={
+                  <Label htmlFor="rulesSearchInput">
+                    <Stack gap={0.5}>
+                      <span>Search</span>
+                      <HoverCard content={<SearchQueryHelp />}>
+                        <Icon name="info-circle" size="sm" tabIndex={0} title="Search help" />
+                      </HoverCard>
+                    </Stack>
+                  </Label>
+                }
+              >
+                <Input
+                  id="rulesSearchInput"
+                  key={queryStringKey}
+                  prefix={searchIcon}
+                  ref={(e) => {
+                    ref(e);
+                    searchQueryRef.current = e;
+                  }}
+                  {...rest}
+                  placeholder="Search"
+                  data-testid="search-query-input"
+                />
+              </Field>
+              <input type="submit" hidden />
+            </form>
+            <div>
+              <Label>View as</Label>
+              <RadioButtonGroup
+                options={ViewOptions}
+                value={String(queryParams['view'] ?? ViewOptions[0].value)}
+                onChange={handleViewChange}
+              />
+            </div>
+          </Stack>
+          {hasActiveFilters && (
+            <div>
+              <Button fullWidth={false} icon="times" variant="secondary" onClick={handleClearFiltersClick}>
+                Clear filters
+              </Button>
+            </div>
+          )}
+        </Stack>
+      </Stack>
     </div>
   );
 };
 
 const getStyles = (theme: GrafanaTheme2) => {
   return {
-    container: css`
-      display: flex;
-      flex-direction: column;
-      padding-bottom: ${theme.spacing(1)};
-      margin-bottom: ${theme.spacing(1)};
-    `,
-    inputWidth: css`
-      width: 340px;
-      flex-grow: 0;
-    `,
-    flexRow: css`
-      display: flex;
-      flex-direction: row;
-      align-items: flex-end;
-      width: 100%;
-      flex-wrap: wrap;
-    `,
-    spaceBetween: css`
-      justify-content: space-between;
-    `,
-    rowChild: css`
-      margin: ${theme.spacing(0, 1, 0, 0)};
-    `,
-    clearButton: css`
-      margin-top: ${theme.spacing(1)};
-    `,
+    container: css({
+      marginBottom: theme.spacing(1),
+    }),
+    dsPickerContainer: css({
+      width: theme.spacing(60),
+      flexGrow: 0,
+      margin: 0,
+    }),
+    dashboardPickerContainer: css({
+      minWidth: theme.spacing(50),
+    }),
+    searchInput: css({
+      flex: 1,
+      margin: 0,
+    }),
   };
 };
+
+function SearchQueryHelp() {
+  const styles = useStyles2(helpStyles);
+
+  return (
+    <div>
+      <div>Search syntax allows to query alert rules by the parameters defined below.</div>
+      <hr />
+      <div className={styles.grid}>
+        <div>Filter type</div>
+        <div>Expression</div>
+        <HelpRow title="Datasources" expr="datasource:mimir datasource:prometheus" />
+        <HelpRow title="Folder/Namespace" expr="namespace:global" />
+        <HelpRow title="Group" expr="group:cpu-usage" />
+        <HelpRow title="Rule" expr='rule:"cpu 80%"' />
+        <HelpRow title="Labels" expr="label:team=A label:cluster=a1" />
+        <HelpRow title="State" expr="state:firing|normal|pending" />
+        <HelpRow title="Type" expr="type:alerting|recording" />
+        <HelpRow title="Health" expr="health:ok|nodata|error" />
+        <HelpRow title="Dashboard UID" expr="dashboard:eadde4c7-54e6-4964-85c0-484ab852fd04" />
+      </div>
+    </div>
+  );
+}
+
+function HelpRow({ title, expr }: { title: string; expr: string }) {
+  const styles = useStyles2(helpStyles);
+
+  return (
+    <>
+      <div>{title}</div>
+      <code className={styles.code}>{expr}</code>
+    </>
+  );
+}
+
+const helpStyles = (theme: GrafanaTheme2) => ({
+  grid: css({
+    display: 'grid',
+    gridTemplateColumns: 'max-content auto',
+    gap: theme.spacing(1),
+    alignItems: 'center',
+  }),
+  code: css({
+    display: 'block',
+    textAlign: 'center',
+  }),
+});
 
 export default RulesFilter;

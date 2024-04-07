@@ -2,54 +2,61 @@ package clients
 
 import (
 	"context"
+	"time"
 
 	"github.com/grafana/grafana/pkg/services/authn"
+	"github.com/grafana/grafana/pkg/services/login"
 	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/services/rendering"
-	"github.com/grafana/grafana/pkg/services/user"
 	"github.com/grafana/grafana/pkg/util/errutil"
 )
 
 var (
-	ErrInvalidRenderKey = errutil.NewBase(errutil.StatusUnauthorized, "render-auth.invalid-key", errutil.WithPublicMessage("Invalid Render Key"))
+	errInvalidRenderKey = errutil.Unauthorized("render-auth.invalid-key", errutil.WithPublicMessage("Invalid Render Key"))
 )
 
 const (
 	renderCookieName = "renderKey"
 )
 
-var _ authn.Client = new(Render)
+var _ authn.ContextAwareClient = new(Render)
 
-func ProvideRender(userService user.Service, renderService rendering.Service) *Render {
-	return &Render{userService, renderService}
+func ProvideRender(renderService rendering.Service) *Render {
+	return &Render{renderService}
 }
 
 type Render struct {
-	userService   user.Service
 	renderService rendering.Service
+}
+
+func (c *Render) Name() string {
+	return authn.ClientRender
 }
 
 func (c *Render) Authenticate(ctx context.Context, r *authn.Request) (*authn.Identity, error) {
 	key := getRenderKey(r)
 	renderUsr, ok := c.renderService.GetRenderUser(ctx, key)
 	if !ok {
-		return nil, ErrInvalidRenderKey.Errorf("found no render user for key: %s", key)
+		return nil, errInvalidRenderKey.Errorf("found no render user for key: %s", key)
 	}
 
 	if renderUsr.UserID <= 0 {
 		return &authn.Identity{
-			ID:           authn.NamespacedID(authn.NamespaceUser, 0),
-			OrgID:        renderUsr.OrgID,
-			OrgRoles:     map[int64]org.RoleType{renderUsr.OrgID: org.RoleType(renderUsr.OrgRole)},
-			ClientParams: authn.ClientParams{},
+			ID:              authn.NamespacedID(authn.NamespaceRenderService, 0),
+			OrgID:           renderUsr.OrgID,
+			OrgRoles:        map[int64]org.RoleType{renderUsr.OrgID: org.RoleType(renderUsr.OrgRole)},
+			ClientParams:    authn.ClientParams{SyncPermissions: true},
+			LastSeenAt:      time.Now(),
+			AuthenticatedBy: login.RenderModule,
 		}, nil
 	}
 
-	usr, err := c.userService.GetSignedInUserWithCacheCtx(ctx, &user.GetSignedInUserQuery{UserID: renderUsr.UserID, OrgID: renderUsr.OrgID})
-	if err != nil {
-		return nil, err
-	}
-	return authn.IdentityFromSignedInUser(authn.NamespacedID(authn.NamespaceUser, usr.UserID), usr, authn.ClientParams{}), nil
+	return &authn.Identity{
+		ID:              authn.NamespacedID(authn.NamespaceUser, renderUsr.UserID),
+		LastSeenAt:      time.Now(),
+		AuthenticatedBy: login.RenderModule,
+		ClientParams:    authn.ClientParams{FetchSyncedUser: true, SyncPermissions: true},
+	}, nil
 }
 
 func (c *Render) Test(ctx context.Context, r *authn.Request) bool {
@@ -57,6 +64,10 @@ func (c *Render) Test(ctx context.Context, r *authn.Request) bool {
 		return false
 	}
 	return getRenderKey(r) != ""
+}
+
+func (c *Render) Priority() uint {
+	return 10
 }
 
 func getRenderKey(r *authn.Request) string {

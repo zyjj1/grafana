@@ -68,9 +68,14 @@ export const VizLegendListItem = <T = unknown,>({
   return (
     <div
       className={cx(styles.itemWrapper, item.disabled && styles.itemDisabled, className)}
-      aria-label={selectors.components.VizLegend.seriesName(item.label)}
+      data-testid={selectors.components.VizLegend.seriesName(item.label)}
     >
-      <VizLegendSeriesIcon seriesName={item.label} color={item.color} gradient={item.gradient} readonly={readonly} />
+      <VizLegendSeriesIcon
+        seriesName={item.fieldName ?? item.label}
+        color={item.color}
+        gradient={item.gradient}
+        readonly={readonly}
+      />
       <button
         disabled={readonly}
         type="button"
@@ -92,29 +97,30 @@ export const VizLegendListItem = <T = unknown,>({
 VizLegendListItem.displayName = 'VizLegendListItem';
 
 const getStyles = (theme: GrafanaTheme2) => ({
-  label: css`
-    label: LegendLabel;
-    white-space: nowrap;
-    background: none;
-    border: none;
-    font-size: inherit;
-    padding: 0;
-  `,
-  itemDisabled: css`
-    label: LegendLabelDisabled;
-    color: ${theme.colors.text.disabled};
-  `,
-  itemWrapper: css`
-    label: LegendItemWrapper;
-    display: flex;
-    white-space: nowrap;
-    align-items: center;
-    flex-grow: 1;
-  `,
-  value: css`
-    text-align: right;
-  `,
-  yAxisLabel: css`
-    color: ${theme.v1.palette.gray2};
-  `,
+  label: css({
+    label: 'LegendLabel',
+    whiteSpace: 'nowrap',
+    background: 'none',
+    border: 'none',
+    fontSize: 'inherit',
+    padding: 0,
+    userSelect: 'text',
+  }),
+  itemDisabled: css({
+    label: 'LegendLabelDisabled',
+    color: theme.colors.text.disabled,
+  }),
+  itemWrapper: css({
+    label: 'LegendItemWrapper',
+    display: 'flex',
+    whiteSpace: 'nowrap',
+    alignItems: 'center',
+    flexGrow: 1,
+  }),
+  value: css({
+    textAlign: 'right',
+  }),
+  yAxisLabel: css({
+    color: theme.v1.palette.gray2,
+  }),
 });

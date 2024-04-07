@@ -4,18 +4,67 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
 	"github.com/grafana/grafana/pkg/util"
+	"github.com/grafana/grafana/pkg/util/cmputil"
 )
+
+func TestSortAlertRulesByGroupKeyAndIndex(t *testing.T) {
+	tc := []struct {
+		name     string
+		input    []*AlertRule
+		expected []*AlertRule
+	}{{
+		name: "alert rules are ordered by organization",
+		input: []*AlertRule{
+			{OrgID: 2, NamespaceUID: "test2"},
+			{OrgID: 1, NamespaceUID: "test1"},
+		},
+		expected: []*AlertRule{
+			{OrgID: 1, NamespaceUID: "test1"},
+			{OrgID: 2, NamespaceUID: "test2"},
+		},
+	}, {
+		name: "alert rules in same organization are ordered by namespace",
+		input: []*AlertRule{
+			{OrgID: 1, NamespaceUID: "test2"},
+			{OrgID: 1, NamespaceUID: "test1"},
+		},
+		expected: []*AlertRule{
+			{OrgID: 1, NamespaceUID: "test1"},
+			{OrgID: 1, NamespaceUID: "test2"},
+		},
+	}, {
+		name: "alert rules with same group key are ordered by index",
+		input: []*AlertRule{
+			{OrgID: 1, NamespaceUID: "test", RuleGroupIndex: 2},
+			{OrgID: 1, NamespaceUID: "test", RuleGroupIndex: 1},
+		},
+		expected: []*AlertRule{
+			{OrgID: 1, NamespaceUID: "test", RuleGroupIndex: 1},
+			{OrgID: 1, NamespaceUID: "test", RuleGroupIndex: 2},
+		},
+	}}
+
+	for _, tt := range tc {
+		t.Run(tt.name, func(t *testing.T) {
+			AlertRulesBy(AlertRulesByGroupKeyAndIndex).Sort(tt.input)
+			assert.EqualValues(t, tt.expected, tt.input)
+		})
+	}
+}
 
 func TestNoDataStateFromString(t *testing.T) {
 	allKnownNoDataStates := [...]NoDataState{
@@ -166,51 +215,58 @@ func TestPatchPartialAlertRule(t *testing.T) {
 	t.Run("patches", func(t *testing.T) {
 		testCases := []struct {
 			name    string
-			mutator func(r *AlertRule)
+			mutator func(r *AlertRuleWithOptionals)
 		}{
 			{
 				name: "title is empty",
-				mutator: func(r *AlertRule) {
+				mutator: func(r *AlertRuleWithOptionals) {
 					r.Title = ""
 				},
 			},
 			{
 				name: "condition and data are empty",
-				mutator: func(r *AlertRule) {
+				mutator: func(r *AlertRuleWithOptionals) {
 					r.Condition = ""
 					r.Data = nil
 				},
 			},
 			{
 				name: "ExecErrState is empty",
-				mutator: func(r *AlertRule) {
+				mutator: func(r *AlertRuleWithOptionals) {
 					r.ExecErrState = ""
 				},
 			},
 			{
 				name: "NoDataState is empty",
-				mutator: func(r *AlertRule) {
+				mutator: func(r *AlertRuleWithOptionals) {
 					r.NoDataState = ""
 				},
 			},
 			{
 				name: "For is -1",
-				mutator: func(r *AlertRule) {
+				mutator: func(r *AlertRuleWithOptionals) {
 					r.For = -1
+				},
+			},
+			{
+				name: "IsPaused did not come in request",
+				mutator: func(r *AlertRuleWithOptionals) {
+					r.IsPaused = true
 				},
 			},
 		}
 
 		for _, testCase := range testCases {
 			t.Run(testCase.name, func(t *testing.T) {
-				var existing *AlertRule
+				var existing *AlertRuleWithOptionals
 				for {
-					existing = AlertRuleGen(func(rule *AlertRule) {
+					rule := AlertRuleGen(func(rule *AlertRule) {
 						rule.For = time.Duration(rand.Int63n(1000) + 1)
 					})()
+					existing = &AlertRuleWithOptionals{AlertRule: *rule}
 					cloned := *existing
 					testCase.mutator(&cloned)
-					if !cmp.Equal(*existing, cloned, cmp.FilterPath(func(path cmp.Path) bool {
+					if !cmp.Equal(existing, cloned, cmp.FilterPath(func(path cmp.Path) bool {
 						return path.String() == "Data.modelProps"
 					}, cmp.Ignore())) {
 						break
@@ -220,7 +276,7 @@ func TestPatchPartialAlertRule(t *testing.T) {
 				testCase.mutator(&patch)
 
 				require.NotEqual(t, *existing, patch)
-				PatchPartialAlertRule(existing, &patch)
+				PatchPartialAlertRule(&existing.AlertRule, &patch)
 				require.Equal(t, *existing, patch)
 			})
 		}
@@ -301,10 +357,10 @@ func TestPatchPartialAlertRule(t *testing.T) {
 						break
 					}
 				}
-				patch := *existing
-				testCase.mutator(&patch)
+				patch := AlertRuleWithOptionals{AlertRule: *existing}
+				testCase.mutator(&patch.AlertRule)
 				PatchPartialAlertRule(existing, &patch)
-				require.NotEqual(t, *existing, patch)
+				require.NotEqual(t, *existing, &patch.AlertRule)
 			})
 		}
 	})
@@ -332,7 +388,7 @@ func TestDiff(t *testing.T) {
 		rule1 := AlertRuleGen()()
 		rule2 := AlertRuleGen()()
 
-		diffs := rule1.Diff(rule2, "Data", "Annotations", "Labels") // these fields will be tested separately
+		diffs := rule1.Diff(rule2, "Data", "Annotations", "Labels", "NotificationSettings") // these fields will be tested separately
 
 		difCnt := 0
 		if rule1.ID != rule2.ID {
@@ -558,7 +614,7 @@ func TestDiff(t *testing.T) {
 			},
 			DatasourceUID: util.GenerateShortUID(),
 			Model:         json.RawMessage(`{ "test": "data"}`),
-			modelProps: map[string]interface{}{
+			modelProps: map[string]any{
 				"test": 1,
 			},
 		}
@@ -567,7 +623,7 @@ func TestDiff(t *testing.T) {
 
 		t.Run("should ignore modelProps", func(t *testing.T) {
 			query2 := query1
-			query2.modelProps = map[string]interface{}{
+			query2.modelProps = map[string]any{
 				"some": "other value",
 			}
 			rule2.Data = []AlertQuery{query2}
@@ -600,6 +656,21 @@ func TestDiff(t *testing.T) {
 			}
 		})
 
+		t.Run("should correctly detect no change with '<' and '>' in query", func(t *testing.T) {
+			old := query1
+			new := query1
+			old.Model = json.RawMessage(`{"field1": "$A \u003c 1"}`)
+			new.Model = json.RawMessage(`{"field1": "$A < 1"}`)
+			rule1.Data = []AlertQuery{old}
+			rule2.Data = []AlertQuery{new}
+
+			diff := rule1.Diff(rule2)
+			assert.Nil(t, diff)
+
+			// reset rule1
+			rule1.Data = []AlertQuery{query1}
+		})
+
 		t.Run("should detect new changes in array if too many fields changed", func(t *testing.T) {
 			query2 := query1
 			query2.QueryType = "test"
@@ -625,6 +696,117 @@ func TestDiff(t *testing.T) {
 				t.Logf("rule1: %#v, rule2: %#v\ndiff: %v", rule1, rule2, diff)
 			}
 		})
+	})
+
+	t.Run("should detect changes in NotificationSettings", func(t *testing.T) {
+		rule1 := AlertRuleGen()()
+
+		baseSettings := NotificationSettingsGen(NSMuts.WithGroupBy("test1", "test2"))()
+		rule1.NotificationSettings = []NotificationSettings{baseSettings}
+
+		addTime := func(d *model.Duration, duration time.Duration) *time.Duration {
+			dur := time.Duration(*d)
+			dur += duration
+			return &dur
+		}
+
+		testCases := []struct {
+			name                 string
+			notificationSettings NotificationSettings
+			diffs                cmputil.DiffReport
+		}{
+			{
+				name:                 "should detect changes in Receiver",
+				notificationSettings: CopyNotificationSettings(baseSettings, NSMuts.WithReceiver(baseSettings.Receiver+"-modified")),
+				diffs: []cmputil.Diff{
+					{
+						Path:  "NotificationSettings[0].Receiver",
+						Left:  reflect.ValueOf(baseSettings.Receiver),
+						Right: reflect.ValueOf(baseSettings.Receiver + "-modified"),
+					},
+				},
+			},
+			{
+				name:                 "should detect changes in GroupWait",
+				notificationSettings: CopyNotificationSettings(baseSettings, NSMuts.WithGroupWait(addTime(baseSettings.GroupWait, 1*time.Second))),
+				diffs: []cmputil.Diff{
+					{
+						Path:  "NotificationSettings[0].GroupWait",
+						Left:  reflect.ValueOf(*baseSettings.GroupWait),
+						Right: reflect.ValueOf(model.Duration(*addTime(baseSettings.GroupWait, 1*time.Second))),
+					},
+				},
+			},
+			{
+				name:                 "should detect changes in GroupInterval",
+				notificationSettings: CopyNotificationSettings(baseSettings, NSMuts.WithGroupInterval(addTime(baseSettings.GroupInterval, 1*time.Second))),
+				diffs: []cmputil.Diff{
+					{
+						Path:  "NotificationSettings[0].GroupInterval",
+						Left:  reflect.ValueOf(*baseSettings.GroupInterval),
+						Right: reflect.ValueOf(model.Duration(*addTime(baseSettings.GroupInterval, 1*time.Second))),
+					},
+				},
+			},
+			{
+				name:                 "should detect changes in RepeatInterval",
+				notificationSettings: CopyNotificationSettings(baseSettings, NSMuts.WithRepeatInterval(addTime(baseSettings.RepeatInterval, 1*time.Second))),
+				diffs: []cmputil.Diff{
+					{
+						Path:  "NotificationSettings[0].RepeatInterval",
+						Left:  reflect.ValueOf(*baseSettings.RepeatInterval),
+						Right: reflect.ValueOf(model.Duration(*addTime(baseSettings.RepeatInterval, 1*time.Second))),
+					},
+				},
+			},
+			{
+				name:                 "should detect changes in GroupBy",
+				notificationSettings: CopyNotificationSettings(baseSettings, NSMuts.WithGroupBy(baseSettings.GroupBy[0]+"-modified", baseSettings.GroupBy[1]+"-modified")),
+				diffs: []cmputil.Diff{
+					{
+						Path:  "NotificationSettings[0].GroupBy[0]",
+						Left:  reflect.ValueOf(baseSettings.GroupBy[0]),
+						Right: reflect.ValueOf(baseSettings.GroupBy[0] + "-modified"),
+					},
+					{
+						Path:  "NotificationSettings[0].GroupBy[1]",
+						Left:  reflect.ValueOf(baseSettings.GroupBy[1]),
+						Right: reflect.ValueOf(baseSettings.GroupBy[1] + "-modified"),
+					},
+				},
+			},
+			{
+				name:                 "should detect changes in MuteTimeIntervals",
+				notificationSettings: CopyNotificationSettings(baseSettings, NSMuts.WithMuteTimeIntervals(baseSettings.MuteTimeIntervals[0]+"-modified", baseSettings.MuteTimeIntervals[1]+"-modified")),
+				diffs: []cmputil.Diff{
+					{
+						Path:  "NotificationSettings[0].MuteTimeIntervals[0]",
+						Left:  reflect.ValueOf(baseSettings.MuteTimeIntervals[0]),
+						Right: reflect.ValueOf(baseSettings.MuteTimeIntervals[0] + "-modified"),
+					},
+					{
+						Path:  "NotificationSettings[0].MuteTimeIntervals[1]",
+						Left:  reflect.ValueOf(baseSettings.MuteTimeIntervals[1]),
+						Right: reflect.ValueOf(baseSettings.MuteTimeIntervals[1] + "-modified"),
+					},
+				},
+			},
+		}
+
+		for _, tt := range testCases {
+			t.Run(tt.name, func(t *testing.T) {
+				rule2 := CopyRule(rule1)
+				rule2.NotificationSettings = []NotificationSettings{tt.notificationSettings}
+				diffs := rule1.Diff(rule2)
+
+				cOpt := []cmp.Option{
+					cmpopts.IgnoreUnexported(cmputil.Diff{}),
+				}
+				if !cmp.Equal(diffs, tt.diffs, cOpt...) {
+					t.Errorf("Unexpected Diffs: %v", cmp.Diff(diffs, tt.diffs, cOpt...))
+				}
+			})
+		}
 	})
 }
 

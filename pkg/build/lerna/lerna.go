@@ -1,6 +1,7 @@
 package lerna
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/grafana/grafana/pkg/build/config"
+	"github.com/grafana/grafana/pkg/build/fsutil"
 )
 
 // BuildFrontendPackages will bump the version for the package to the latest canary build
@@ -45,7 +47,7 @@ func GetLernaVersion(grafanaDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to read %q: %w", lernaJSONPath, err)
 	}
-	pkgObj := map[string]interface{}{}
+	pkgObj := map[string]any{}
 	if err := json.Unmarshal(lernaJSONB, &pkgObj); err != nil {
 		return "", fmt.Errorf("failed decoding %q: %w", lernaJSONPath, err)
 	}
@@ -55,4 +57,30 @@ func GetLernaVersion(grafanaDir string) (string, error) {
 		return "", fmt.Errorf("failed to read version from %q", lernaJSONPath)
 	}
 	return strings.TrimSpace(version), nil
+}
+
+func PackFrontendPackages(ctx context.Context, tag, grafanaDir, artifactsDir string) error {
+	exists, err := fsutil.Exists(artifactsDir)
+	if err != nil {
+		return err
+	}
+	if exists {
+		err = os.RemoveAll(artifactsDir)
+		if err != nil {
+			return err
+		}
+	}
+	// nolint:gosec
+	if err = os.MkdirAll(artifactsDir, 0755); err != nil {
+		return err
+	}
+
+	// nolint:gosec
+	cmd := exec.CommandContext(ctx, "yarn", "lerna", "exec", "--no-private", "--", "yarn", "pack", "--out", fmt.Sprintf("../../npm-artifacts/%%s-%v.tgz", tag))
+	cmd.Dir = grafanaDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("command '%s' failed to run, output: %s, err: %q", cmd.String(), output, err)
+	}
+
+	return nil
 }

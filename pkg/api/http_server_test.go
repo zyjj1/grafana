@@ -3,8 +3,9 @@ package api
 import (
 	"testing"
 
-	"github.com/grafana/grafana/pkg/setting"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/grafana/grafana/pkg/setting"
 )
 
 func TestHTTPServer_MetricsBasicAuth(t *testing.T) {
@@ -24,5 +25,15 @@ func TestHTTPServer_MetricsBasicAuth(t *testing.T) {
 		ts.Cfg.MetricsEndpointBasicAuthPassword = ""
 
 		assert.False(t, ts.metricsEndpointBasicAuthEnabled())
+	})
+}
+
+func TestHTTPServer_readCertificates(t *testing.T) {
+	ts := &HTTPServer{
+		Cfg: setting.NewCfg(),
+	}
+	t.Run("ReadCertificates should return error when cert files are not configured", func(t *testing.T) {
+		_, err := ts.readCertificates()
+		assert.NotNil(t, err)
 	})
 }

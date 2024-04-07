@@ -7,8 +7,9 @@ import { cleanUpAction } from '../actions/cleanUp';
 import { createRootReducer } from './root';
 
 jest.mock('@grafana/runtime', () => ({
-  ...(jest.requireActual('@grafana/runtime') as unknown as object),
+  ...jest.requireActual('@grafana/runtime'),
   config: {
+    ...jest.requireActual('@grafana/runtime').config,
     bootData: {
       navTree: [],
       user: {},

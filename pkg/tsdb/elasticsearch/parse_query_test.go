@@ -3,6 +3,7 @@ package elasticsearch
 import (
 	"testing"
 
+	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -10,7 +11,6 @@ func TestParseQuery(t *testing.T) {
 	t.Run("Test parse query", func(t *testing.T) {
 		t.Run("Should be able to parse query", func(t *testing.T) {
 			body := `{
-				"timeField": "@timestamp",
 				"query": "@metric:cpu",
 				"alias": "{{@hostname}} {{metric}}",
         		"interval": "10m",
@@ -61,13 +61,12 @@ func TestParseQuery(t *testing.T) {
 			}`
 			dataQuery, err := newDataQuery(body)
 			require.NoError(t, err)
-			queries, err := parseQuery(dataQuery.Queries)
+			queries, err := parseQuery(dataQuery.Queries, log.New("test.logger"))
 			require.NoError(t, err)
 			require.Len(t, queries, 1)
 
 			q := queries[0]
 
-			require.Equal(t, q.TimeField, "@timestamp")
 			require.Equal(t, q.RawQuery, "@metric:cpu")
 			require.Equal(t, q.Alias, "{{@hostname}} {{metric}}")
 			require.Equal(t, q.Interval.String(), "10s")

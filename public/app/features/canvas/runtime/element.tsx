@@ -1,5 +1,5 @@
 import React, { CSSProperties } from 'react';
-import { OnDrag, OnResize } from 'react-moveable/declaration/types';
+import { OnDrag, OnResize, OnRotate } from 'react-moveable/declaration/types';
 
 import { LayerElement } from 'app/core/components/Layers/types';
 import {
@@ -10,6 +10,7 @@ import {
 } from 'app/features/canvas';
 import { notFoundItem } from 'app/features/canvas/elements/notFound';
 import { DimensionContext } from 'app/features/dimensions';
+import { getConnectionsByTarget, isConnectionTarget } from 'app/plugins/panel/canvas/utils';
 
 import { Constraint, HorizontalConstraint, Placement, VerticalConstraint } from '../types';
 
@@ -18,6 +19,8 @@ import { RootElement } from './root';
 import { Scene } from './scene';
 
 let counter = 0;
+
+export const SVGElements = new Set<string>(['parallelogram', 'triangle', 'cloud', 'ellipse']);
 
 export class ElementState implements LayerElement {
   // UID necessary for moveable to work (for now)
@@ -35,7 +38,11 @@ export class ElementState implements LayerElement {
   // Calculated
   data?: any; // depends on the type
 
-  constructor(public item: CanvasElementItem, public options: CanvasElementOptions, public parent?: FrameState) {
+  constructor(
+    public item: CanvasElementItem,
+    public options: CanvasElementOptions,
+    public parent?: FrameState
+  ) {
     const fallbackName = `Element ${Date.now()}`;
     if (!options) {
       this.options = { type: item.id, name: fallbackName };
@@ -45,7 +52,7 @@ export class ElementState implements LayerElement {
       vertical: VerticalConstraint.Top,
       horizontal: HorizontalConstraint.Left,
     };
-    options.placement = options.placement ?? { width: 100, height: 100, top: 0, left: 0 };
+    options.placement = options.placement ?? { width: 100, height: 100, top: 0, left: 0, rotation: 0 };
     options.background = options.background ?? { color: { fixed: 'transparent' } };
     options.border = options.border ?? { color: { fixed: 'dark-green' } };
     const scene = this.getScene();
@@ -81,7 +88,7 @@ export class ElementState implements LayerElement {
 
     const { constraint } = this.options;
     const { vertical, horizontal } = constraint ?? {};
-    const placement = this.options.placement ?? ({} as Placement);
+    const placement: Placement = this.options.placement ?? {};
 
     const editingEnabled = this.getScene()?.isEditingEnabled;
 
@@ -92,6 +99,7 @@ export class ElementState implements LayerElement {
       // Minimum element size is 10x10
       minWidth: '10px',
       minHeight: '10px',
+      rotate: `${placement.rotation ?? 0}deg`,
     };
 
     const translate = ['0px', '0px'];
@@ -181,18 +189,36 @@ export class ElementState implements LayerElement {
     style.transform = `translate(${translate[0]}, ${translate[1]})`;
     this.options.placement = placement;
     this.sizeStyle = style;
+
     if (this.div) {
       for (const key in this.sizeStyle) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         this.div.style[key as any] = (this.sizeStyle as any)[key];
       }
 
-      for (const key in this.dataStyle) {
-        this.div.style[key as any] = (this.dataStyle as any)[key];
+      // TODO: This is a hack, we should have a better way to handle this
+      const elementType = this.options.type;
+      if (!SVGElements.has(elementType)) {
+        // apply styles to div if it's not an SVG element
+        for (const key in this.dataStyle) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          this.div.style[key as any] = (this.dataStyle as any)[key];
+        }
+      } else {
+        // ELEMENT IS SVG
+        // clean data styles from div if it's an SVG element; SVG elements have their own data styles;
+        // this is necessary for changing type of element cases;
+        // wrapper div element (this.div) doesn't re-render (has static `key` property),
+        // so we have to clean styles manually;
+        for (const key in this.dataStyle) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          this.div.style[key as any] = '';
+        }
       }
     }
   }
 
-  setPlacementFromConstraint(elementContainer?: DOMRect, parentContainer?: DOMRect) {
+  setPlacementFromConstraint(elementContainer?: DOMRect, parentContainer?: DOMRect, transformScale = 1) {
     const { constraint } = this.options;
     const { vertical, horizontal } = constraint ?? {};
 
@@ -207,27 +233,62 @@ export class ElementState implements LayerElement {
         : parseFloat(getComputedStyle(this.div?.parentElement!).borderWidth);
     }
 
+    // For elements with rotation, a delta needs to be applied to account for bounding box rotation
+    // TODO: Fix behavior for top+bottom, left+right, center, and scale constraints
+    let rotationTopOffset = 0;
+    let rotationLeftOffset = 0;
+    if (this.options.placement?.rotation && this.options.placement?.width && this.options.placement?.height) {
+      const rotationDegrees = this.options.placement.rotation;
+      const rotationRadians = (Math.PI / 180) * rotationDegrees;
+      let rotationOffset = rotationRadians;
+
+      switch (true) {
+        case rotationDegrees >= 0 && rotationDegrees < 90:
+          // no-op
+          break;
+        case rotationDegrees >= 90 && rotationDegrees < 180:
+          rotationOffset = Math.PI - rotationRadians;
+          break;
+        case rotationDegrees >= 180 && rotationDegrees < 270:
+          rotationOffset = Math.PI + rotationRadians;
+          break;
+        case rotationDegrees >= 270:
+          rotationOffset = -rotationRadians;
+          break;
+      }
+
+      const calculateDelta = (dimension1: number, dimension2: number) =>
+        (dimension1 / 2) * Math.sin(rotationOffset) + (dimension2 / 2) * (Math.cos(rotationOffset) - 1);
+
+      rotationTopOffset = calculateDelta(this.options.placement.width, this.options.placement.height);
+      rotationLeftOffset = calculateDelta(this.options.placement.height, this.options.placement.width);
+    }
+
     const relativeTop =
       elementContainer && parentContainer
-        ? Math.round(elementContainer.top - parentContainer.top - parentBorderWidth)
+        ? Math.round(elementContainer.top - parentContainer.top - parentBorderWidth + rotationTopOffset) /
+          transformScale
         : 0;
     const relativeBottom =
       elementContainer && parentContainer
-        ? Math.round(parentContainer.bottom - parentBorderWidth - elementContainer.bottom)
+        ? Math.round(parentContainer.bottom - parentBorderWidth - elementContainer.bottom + rotationTopOffset) /
+          transformScale
         : 0;
     const relativeLeft =
       elementContainer && parentContainer
-        ? Math.round(elementContainer.left - parentContainer.left - parentBorderWidth)
+        ? Math.round(elementContainer.left - parentContainer.left - parentBorderWidth + rotationLeftOffset) /
+          transformScale
         : 0;
     const relativeRight =
       elementContainer && parentContainer
-        ? Math.round(parentContainer.right - parentBorderWidth - elementContainer.right)
+        ? Math.round(parentContainer.right - parentBorderWidth - elementContainer.right + rotationLeftOffset) /
+          transformScale
         : 0;
 
-    const placement = {} as Placement;
+    const placement: Placement = {};
 
-    const width = elementContainer?.width ?? 100;
-    const height = elementContainer?.height ?? 100;
+    const width = (elementContainer?.width ?? 100) / transformScale;
+    const height = (elementContainer?.height ?? 100) / transformScale;
 
     switch (vertical) {
       case VerticalConstraint.Top:
@@ -281,6 +342,12 @@ export class ElementState implements LayerElement {
         break;
     }
 
+    if (this.options.placement?.rotation) {
+      placement.rotation = this.options.placement.rotation;
+      placement.width = this.options.placement.width;
+      placement.height = this.options.placement.height;
+    }
+
     this.options.placement = placement;
 
     this.applyLayoutStylesToDiv();
@@ -291,7 +358,7 @@ export class ElementState implements LayerElement {
 
   updateData(ctx: DimensionContext) {
     if (this.item.prepareData) {
-      this.data = this.item.prepareData(ctx, this.options.config);
+      this.data = this.item.prepareData(ctx, this.options);
       this.revId++; // rerender
     }
 
@@ -346,6 +413,10 @@ export class ElementState implements LayerElement {
       }
     }
 
+    if (border && border.radius !== undefined) {
+      css.borderRadius = `${border.radius}px`;
+    }
+
     this.dataStyle = css;
     this.applyLayoutStylesToDiv();
   }
@@ -382,6 +453,12 @@ export class ElementState implements LayerElement {
 
     const scene = this.getScene();
     if (oldName !== newName && scene) {
+      if (isConnectionTarget(this, scene.byName)) {
+        getConnectionsByTarget(this, scene).forEach((connection) => {
+          connection.info.targetName = newName;
+        });
+      }
+
       scene.byName.delete(oldName);
       scene.byName.set(newName, this);
     }
@@ -414,16 +491,36 @@ export class ElementState implements LayerElement {
     event.target.style.transform = event.transform;
   };
 
+  applyRotate = (event: OnRotate) => {
+    const absoluteRotationDegree = event.absoluteRotation;
+
+    const placement = this.options.placement!;
+    // Ensure rotation is between 0 and 360
+    placement.rotation = absoluteRotationDegree - Math.floor(absoluteRotationDegree / 360) * 360;
+    event.target.style.transform = event.transform;
+  };
+
   // kinda like:
   // https://github.com/grafana/grafana-edge-app/blob/main/src/panels/draw/WrapItem.tsx#L44
-  applyResize = (event: OnResize) => {
+  applyResize = (event: OnResize, transformScale = 1) => {
     const placement = this.options.placement!;
 
     const style = event.target.style;
-    const deltaX = event.delta[0];
-    const deltaY = event.delta[1];
-    const dirLR = event.direction[0];
-    const dirTB = event.direction[1];
+    let deltaX = event.delta[0] / transformScale;
+    let deltaY = event.delta[1] / transformScale;
+    let dirLR = event.direction[0];
+    let dirTB = event.direction[1];
+
+    // Handle case when element is rotated
+    if (placement.rotation) {
+      const rotation = placement.rotation ?? 0;
+      const rotationInRadians = (rotation * Math.PI) / 180;
+      const originalDirLR = dirLR;
+      const originalDirTB = dirTB;
+
+      dirLR = Math.sign(originalDirLR * Math.cos(rotationInRadians) - originalDirTB * Math.sin(rotationInRadians));
+      dirTB = Math.sign(originalDirLR * Math.sin(rotationInRadians) + originalDirTB * Math.cos(rotationInRadians));
+    }
 
     if (dirLR === 1) {
       placement.width = event.width;
@@ -446,6 +543,60 @@ export class ElementState implements LayerElement {
     }
   };
 
+  handleMouseEnter = (event: React.MouseEvent, isSelected: boolean | undefined) => {
+    const scene = this.getScene();
+    if (!scene?.isEditingEnabled && !scene?.tooltip?.isOpen) {
+      this.handleTooltip(event);
+    } else if (!isSelected) {
+      scene?.connections.handleMouseEnter(event);
+    }
+  };
+
+  handleTooltip = (event: React.MouseEvent) => {
+    const scene = this.getScene();
+    if (scene?.tooltipCallback) {
+      const rect = this.div?.getBoundingClientRect();
+      scene.tooltipCallback({
+        anchorPoint: { x: rect?.right ?? event.pageX, y: rect?.top ?? event.pageY },
+        element: this,
+        isOpen: false,
+      });
+    }
+  };
+
+  handleMouseLeave = (event: React.MouseEvent) => {
+    const scene = this.getScene();
+    if (scene?.tooltipCallback && !scene?.tooltip?.isOpen) {
+      scene.tooltipCallback(undefined);
+    }
+  };
+
+  onElementClick = (event: React.MouseEvent) => {
+    this.handleTooltip(event);
+    this.onTooltipCallback();
+  };
+
+  onElementKeyDown = (event: React.KeyboardEvent) => {
+    if (
+      event.key === 'Enter' &&
+      (event.currentTarget instanceof HTMLElement || event.currentTarget instanceof SVGElement)
+    ) {
+      const scene = this.getScene();
+      scene?.select({ targets: [event.currentTarget] });
+    }
+  };
+
+  onTooltipCallback = () => {
+    const scene = this.getScene();
+    if (scene?.tooltipCallback && scene.tooltip?.anchorPoint) {
+      scene.tooltipCallback({
+        anchorPoint: { x: scene.tooltip.anchorPoint.x, y: scene.tooltip.anchorPoint.y },
+        element: this,
+        isOpen: true,
+      });
+    }
+  };
+
   render() {
     const { item, div } = this;
     const scene = this.getScene();
@@ -453,7 +604,16 @@ export class ElementState implements LayerElement {
     const isSelected = div && scene && scene.selecto && scene.selecto.getSelectedTargets().includes(div);
 
     return (
-      <div key={this.UID} ref={this.initElement}>
+      <div
+        key={this.UID}
+        ref={this.initElement}
+        onMouseEnter={(e: React.MouseEvent) => this.handleMouseEnter(e, isSelected)}
+        onMouseLeave={!scene?.isEditingEnabled ? this.handleMouseLeave : undefined}
+        onClick={!scene?.isEditingEnabled ? this.onElementClick : undefined}
+        onKeyDown={!scene?.isEditingEnabled ? this.onElementKeyDown : undefined}
+        role="button"
+        tabIndex={0}
+      >
         <item.display
           key={`${this.UID}/${this.revId}`}
           config={this.options.config}
