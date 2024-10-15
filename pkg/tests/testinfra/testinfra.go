@@ -20,7 +20,9 @@ import (
 	"github.com/grafana/grafana/pkg/extensions"
 	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/infra/fs"
+	"github.com/grafana/grafana/pkg/infra/tracing"
 	"github.com/grafana/grafana/pkg/server"
+	"github.com/grafana/grafana/pkg/services/apiserver/options"
 	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/services/org/orgimpl"
 	"github.com/grafana/grafana/pkg/services/quota/quotaimpl"
@@ -28,6 +30,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/user"
 	"github.com/grafana/grafana/pkg/services/user/userimpl"
 	"github.com/grafana/grafana/pkg/setting"
+	"github.com/grafana/grafana/pkg/storage/unified/sql"
 )
 
 // StartGrafana starts a Grafana server.
@@ -49,6 +52,28 @@ func StartGrafanaEnv(t *testing.T, grafDir, cfgPath string) (string, *server.Tes
 	serverOpts := server.Options{Listener: listener, HomePath: grafDir}
 	apiServerOpts := api.ServerOptions{Listener: listener}
 
+	// Potentially allocate a real gRPC port for unified storage
+	runstore := false
+	unistore, _ := cfg.Raw.GetSection("grafana-apiserver")
+	if unistore != nil &&
+		unistore.Key("storage_type").MustString("") == string(options.StorageTypeUnifiedGrpc) &&
+		unistore.Key("address").String() == "" {
+		// Allocate a new address
+		listener2, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+
+		cfg.GRPCServerNetwork = "tcp"
+		cfg.GRPCServerAddress = listener2.Addr().String()
+		cfg.GRPCServerTLSConfig = nil
+		_, err = unistore.NewKey("address", cfg.GRPCServerAddress)
+		require.NoError(t, err)
+
+		// release the one we just discovered -- it will be used by the services on startup
+		err = listener2.Close()
+		require.NoError(t, err)
+		runstore = true
+	}
+
 	env, err := server.InitializeForTest(t, cfg, serverOpts, apiServerOpts)
 	require.NoError(t, err)
 
@@ -69,6 +94,21 @@ func StartGrafanaEnv(t *testing.T, grafDir, cfgPath string) (string, *server.Tes
 		})
 	})
 
+	// UnifiedStorageOverGRPC
+	var storage sql.UnifiedStorageGrpcService
+	if runstore {
+		storage, err = sql.ProvideUnifiedStorageGrpcService(env.Cfg, env.FeatureToggles, env.SQLStore, env.Cfg.Logger)
+		require.NoError(t, err)
+		ctx := context.Background()
+		err = storage.StartAsync(ctx)
+		require.NoError(t, err)
+		err = storage.AwaitRunning(ctx)
+		require.NoError(t, err)
+
+		require.NoError(t, err)
+		t.Logf("Unified storage running on %s", storage.GetAddress())
+	}
+
 	go func() {
 		// When the server runs, it will also build and initialize the service graph
 		if err := env.Server.Run(); err != nil {
@@ -78,6 +118,9 @@ func StartGrafanaEnv(t *testing.T, grafDir, cfgPath string) (string, *server.Tes
 	t.Cleanup(func() {
 		if err := env.Server.Shutdown(ctx, "test cleanup"); err != nil {
 			t.Error("Timed out waiting on server to shut down")
+		}
+		if storage != nil {
+			storage.StopAsync()
 		}
 	})
 
@@ -149,6 +192,11 @@ func CreateGrafDir(t *testing.T, opts ...GrafanaOpts) (string, string) {
 	err = os.WriteFile(filepath.Join(buildDir, "assets-manifest.json"), []byte(`{
 		"entrypoints": {
 		  "app": {
+			"assets": {
+			  "js": ["public/build/runtime.XYZ.js"]
+			}
+		  },
+		  "swagger": {
 			"assets": {
 			  "js": ["public/build/runtime.XYZ.js"]
 			}
@@ -347,7 +395,7 @@ func CreateGrafDir(t *testing.T, opts ...GrafanaOpts) (string, string) {
 		if o.APIServerStorageType != "" {
 			section, err := getOrCreateSection("grafana-apiserver")
 			require.NoError(t, err)
-			_, err = section.NewKey("storage_type", o.APIServerStorageType)
+			_, err = section.NewKey("storage_type", string(o.APIServerStorageType))
 			require.NoError(t, err)
 
 			// Hardcoded local etcd until this is needed to run in CI
@@ -375,6 +423,21 @@ func CreateGrafDir(t *testing.T, opts ...GrafanaOpts) (string, string) {
 			require.NoError(t, err)
 			_, err = unifiedAlertingSection.NewKey("min_interval", o.NGAlertSchedulerBaseInterval.String())
 			require.NoError(t, err)
+		}
+
+		if o.GrafanaComAPIURL != "" {
+			grafanaComSection, err := getOrCreateSection("grafana_com")
+			require.NoError(t, err)
+			_, err = grafanaComSection.NewKey("api_url", o.GrafanaComAPIURL)
+			require.NoError(t, err)
+		}
+		if o.UnifiedStorageConfig != nil {
+			for k, v := range o.UnifiedStorageConfig {
+				section, err := getOrCreateSection(fmt.Sprintf("unified_storage.%s", k))
+				require.NoError(t, err)
+				_, err = section.NewKey("dualWriterMode", fmt.Sprintf("%d", v.DualWriterMode))
+				require.NoError(t, err)
+			}
 		}
 	}
 	logSection, err := getOrCreateSection("database")
@@ -421,7 +484,11 @@ type GrafanaOpts struct {
 	EnableLog                             bool
 	GRPCServerAddress                     string
 	QueryRetries                          int64
-	APIServerStorageType                  string
+	GrafanaComAPIURL                      string
+	UnifiedStorageConfig                  map[string]setting.UnifiedStorageConfig
+
+	// When "unified-grpc" is selected it will also start the grpc server
+	APIServerStorageType options.StorageType
 }
 
 func CreateUser(t *testing.T, store db.DB, cfg *setting.Cfg, cmd user.CreateUserCommand) *user.User {
@@ -434,7 +501,9 @@ func CreateUser(t *testing.T, store db.DB, cfg *setting.Cfg, cmd user.CreateUser
 	quotaService := quotaimpl.ProvideService(store, cfg)
 	orgService, err := orgimpl.ProvideService(store, cfg, quotaService)
 	require.NoError(t, err)
-	usrSvc, err := userimpl.ProvideService(store, orgService, cfg, nil, nil, quotaService, supportbundlestest.NewFakeBundleService())
+	usrSvc, err := userimpl.ProvideService(
+		store, orgService, cfg, nil, nil, tracing.InitializeTracerForTest(), quotaService, supportbundlestest.NewFakeBundleService(),
+	)
 	require.NoError(t, err)
 
 	o, err := orgService.CreateWithMember(context.Background(), &org.CreateOrgCommand{Name: fmt.Sprintf("test org %d", time.Now().UnixNano())})

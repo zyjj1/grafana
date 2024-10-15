@@ -1,24 +1,24 @@
+// Core Grafana history https://github.com/grafana/grafana/blob/v11.0.0-preview/public/app/plugins/datasource/prometheus/components/monaco-query-field/monaco-completion-provider/situation.ts
 import type { SyntaxNode, Tree } from '@lezer/common';
 import {
   AggregateExpr,
   AggregateModifier,
+  BinaryExpr,
   EqlRegex,
   EqlSingle,
   FunctionCallBody,
   GroupingLabels,
   Identifier,
-  LabelMatcher,
   LabelMatchers,
-  LabelMatchList,
   LabelName,
   MatchOp,
   MatrixSelector,
-  MetricIdentifier,
   Neq,
   NeqRegex,
   parser,
   PromQL,
   StringLiteral,
+  UnquotedLabelMatcher,
   VectorSelector,
 } from '@prometheus-io/lezer-promql';
 
@@ -33,11 +33,9 @@ type NodeTypeId =
   | typeof FunctionCallBody
   | typeof GroupingLabels
   | typeof Identifier
-  | typeof LabelMatcher
+  | typeof UnquotedLabelMatcher
   | typeof LabelMatchers
-  | typeof LabelMatchList
   | typeof LabelName
-  | typeof MetricIdentifier
   | typeof PromQL
   | typeof StringLiteral
   | typeof VectorSelector
@@ -180,11 +178,15 @@ const RESOLVERS: Resolver[] = [
     fun: resolveInFunction,
   },
   {
-    path: [StringLiteral, LabelMatcher],
+    path: [StringLiteral, UnquotedLabelMatcher],
     fun: resolveLabelMatcher,
   },
   {
-    path: [ERROR_NODE_NAME, LabelMatcher],
+    path: [ERROR_NODE_NAME, BinaryExpr, PromQL],
+    fun: resolveTopLevel,
+  },
+  {
+    path: [ERROR_NODE_NAME, UnquotedLabelMatcher],
     fun: resolveLabelMatcher,
   },
   {
@@ -214,7 +216,7 @@ function getLabelOp(opNode: SyntaxNode): LabelOperator | null {
 }
 
 function getLabel(labelMatcherNode: SyntaxNode, text: string): Label | null {
-  if (labelMatcherNode.type.id !== LabelMatcher) {
+  if (labelMatcherNode.type.id !== UnquotedLabelMatcher) {
     return null;
   }
 
@@ -251,30 +253,8 @@ function getLabels(labelMatchersNode: SyntaxNode, text: string): Label[] {
     return [];
   }
 
-  let listNode: SyntaxNode | null = walk(labelMatchersNode, [['firstChild', LabelMatchList]]);
-
-  const labels: Label[] = [];
-
-  while (listNode !== null) {
-    const matcherNode = walk(listNode, [['lastChild', LabelMatcher]]);
-    if (matcherNode === null) {
-      // unexpected, we stop
-      return [];
-    }
-
-    const label = getLabel(matcherNode, text);
-    if (label !== null) {
-      labels.push(label);
-    }
-
-    // there might be more labels
-    listNode = walk(listNode, [['firstChild', LabelMatchList]]);
-  }
-
-  // our labels-list is last-first, so we reverse it
-  labels.reverse();
-
-  return labels;
+  const labelNodes = labelMatchersNode.getChildren(UnquotedLabelMatcher);
+  return labelNodes.map((ln) => getLabel(ln, text)).filter(notEmpty);
 }
 
 function getNodeChildren(node: SyntaxNode): SyntaxNode[] {
@@ -318,17 +298,12 @@ function resolveLabelsForGrouping(node: SyntaxNode, text: string, pos: number): 
     return null;
   }
 
-  const metricIdNode = getNodeInSubtree(bodyNode, MetricIdentifier);
+  const metricIdNode = getNodeInSubtree(bodyNode, Identifier);
   if (metricIdNode === null) {
     return null;
   }
 
-  const idNode = walk(metricIdNode, [['firstChild', Identifier]]);
-  if (idNode === null) {
-    return null;
-  }
-
-  const metricName = getNodeText(idNode, text);
+  const metricName = getNodeText(metricIdNode, text);
   return {
     type: 'IN_GROUPING',
     metricName,
@@ -342,7 +317,7 @@ function resolveLabelMatcher(node: SyntaxNode, text: string, pos: number): Situa
   // - or an error node (like in `{job=^}`)
   const inStringNode = !node.type.isError;
 
-  const parent = walk(node, [['parent', LabelMatcher]]);
+  const parent = walk(node, [['parent', UnquotedLabelMatcher]]);
   if (parent === null) {
     return null;
   }
@@ -354,42 +329,9 @@ function resolveLabelMatcher(node: SyntaxNode, text: string, pos: number): Situa
 
   const labelName = getNodeText(labelNameNode, text);
 
-  // now we need to go up, to the parent of LabelMatcher,
-  // there can be one or many `LabelMatchList` parents, we have
-  // to go through all of them
-
-  const firstListNode = walk(parent, [['parent', LabelMatchList]]);
-  if (firstListNode === null) {
+  const labelMatchersNode = walk(parent, [['parent', LabelMatchers]]);
+  if (labelMatchersNode === null) {
     return null;
-  }
-
-  let listNode = firstListNode;
-
-  // we keep going through the parent-nodes
-  // as long as they are LabelMatchList.
-  // as soon as we reawch LabelMatchers, we stop
-  let labelMatchersNode: SyntaxNode | null = null;
-  while (labelMatchersNode === null) {
-    const p = listNode.parent;
-    if (p === null) {
-      return null;
-    }
-
-    const { id } = p.type;
-
-    switch (id) {
-      case LabelMatchList:
-        //we keep looping
-        listNode = p;
-        continue;
-      case LabelMatchers:
-        // we reached the end, we can stop the loop
-        labelMatchersNode = p;
-        continue;
-      default:
-        // we reached some other node, we stop
-        return null;
-    }
   }
 
   // now we need to find the other names
@@ -400,7 +342,6 @@ function resolveLabelMatcher(node: SyntaxNode, text: string, pos: number): Situa
 
   const metricNameNode = walk(labelMatchersNode, [
     ['parent', VectorSelector],
-    ['firstChild', MetricIdentifier],
     ['firstChild', Identifier],
   ]);
 
@@ -443,23 +384,10 @@ function resolveDurations(node: SyntaxNode, text: string, pos: number): Situatio
   };
 }
 
-function subTreeHasError(node: SyntaxNode): boolean {
-  return getNodeInSubtree(node, ERROR_NODE_NAME) !== null;
-}
-
 function resolveLabelKeysWithEquals(node: SyntaxNode, text: string, pos: number): Situation | null {
-  // for example `something{^}`
-
-  // there are some false positives that can end up in this situation, that we want
-  // to eliminate:
-  // `something{a~^}` (if this subtree contains any error-node, we stop)
-  if (subTreeHasError(node)) {
-    return null;
-  }
-
   // next false positive:
   // `something{a="1"^}`
-  const child = walk(node, [['firstChild', LabelMatchList]]);
+  const child = walk(node, [['firstChild', UnquotedLabelMatcher]]);
   if (child !== null) {
     // means the label-matching part contains at least one label already.
     //
@@ -476,7 +404,6 @@ function resolveLabelKeysWithEquals(node: SyntaxNode, text: string, pos: number)
 
   const metricNameNode = walk(node, [
     ['parent', VectorSelector],
-    ['firstChild', MetricIdentifier],
     ['firstChild', Identifier],
   ]);
 
@@ -532,12 +459,12 @@ export function getSituation(text: string, pos: number): Situation | null {
     };
   }
 
-  /*
-      PromQL
-    Expr
-    VectorSelector
-    LabelMatchers
-    */
+  /**
+   PromQL
+   Expr
+   VectorSelector
+   LabelMatchers
+   */
   const tree = parser.parse(text);
 
   // if the tree contains error, it is very probable that
@@ -545,7 +472,6 @@ export function getSituation(text: string, pos: number): Situation | null {
   // also, if there are errors, the node lezer finds us,
   // might not be the best node.
   // so first we check if there is an error-node at the cursor-position
-  // @ts-ignore
   const maybeErrorNode = getErrorNode(tree, pos);
 
   const cur = maybeErrorNode != null ? maybeErrorNode.cursor() : tree.cursorAt(pos);
@@ -560,10 +486,13 @@ export function getSituation(text: string, pos: number): Situation | null {
     // i do not use a foreach because i want to stop as soon
     // as i find something
     if (isPathMatch(resolver.path, ids)) {
-      // @ts-ignore
       return resolver.fun(currentNode, text, pos);
     }
   }
 
   return null;
+}
+
+function notEmpty<TValue>(value: TValue | null | undefined): value is TValue {
+  return value !== null && value !== undefined;
 }

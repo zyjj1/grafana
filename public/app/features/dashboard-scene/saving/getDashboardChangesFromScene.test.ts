@@ -44,6 +44,17 @@ describe('getDashboardChangesFromScene', () => {
     expect(result.diffCount).toBe(1);
   });
 
+  it('Can detect folder change', () => {
+    const dashboard = setup();
+
+    dashboard.state.meta.folderUid = 'folder-2';
+
+    const result = getDashboardChangesFromScene(dashboard, false);
+    expect(result.hasChanges).toBe(true);
+    expect(result.diffCount).toBe(0); // Diff count is 0 because the diff contemplate only the model
+    expect(result.hasFolderChanges).toBe(true);
+  });
+
   it('Can detect refresh changed', () => {
     const dashboard = setup();
 
@@ -151,7 +162,7 @@ describe('getDashboardChangesFromScene', () => {
 
         const variable = sceneGraph.lookupVariable('GroupBy', dashboard) as GroupByVariable;
         variable.setState({ defaultOptions: [{ text: 'Host', value: 'host' }] });
-        const result = getDashboardChangesFromScene(dashboard, false, false);
+        const result = getDashboardChangesFromScene(dashboard, false, true);
 
         expect(result.hasVariableValueChanges).toBe(false);
         expect(result.hasChanges).toBe(true);
@@ -226,8 +237,7 @@ describe('getDashboardChangesFromScene', () => {
       dashboard.onEnterEditMode();
       dashboard.setState({ editPanel: editScene });
 
-      editScene.state.vizManager.state.panel.setState({ title: 'changed title' });
-      editScene.commitChanges();
+      editScene.state.panelRef.resolve().setState({ title: 'changed title' });
 
       const result = getDashboardChangesFromScene(dashboard, false, true);
       const panelSaveModel = result.changedSaveModel.panels![0];

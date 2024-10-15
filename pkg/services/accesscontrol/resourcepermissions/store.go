@@ -7,20 +7,24 @@ import (
 	"time"
 
 	"github.com/grafana/grafana/pkg/infra/db"
+	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/services/serviceaccounts"
 	"github.com/grafana/grafana/pkg/services/team"
 	"github.com/grafana/grafana/pkg/services/user"
+	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/util"
 )
 
-func NewStore(sql db.DB, features featuremgmt.FeatureToggles) *store {
-	return &store{sql, features}
+func NewStore(cfg *setting.Cfg, sql db.DB, features featuremgmt.FeatureToggles) *store {
+	store := &store{cfg: cfg, sql: sql, features: features}
+	return store
 }
 
 type store struct {
+	cfg      *setting.Cfg
 	sql      db.DB
 	features featuremgmt.FeatureToggles
 }
@@ -59,6 +63,9 @@ type DeleteResourcePermissionsCmd struct {
 }
 
 func (s *store) DeleteResourcePermissions(ctx context.Context, orgID int64, cmd *DeleteResourcePermissionsCmd) error {
+	ctx, span := tracer.Start(ctx, "accesscontrol.resourcepermissions.DeleteResourcePermissions")
+	defer span.End()
+
 	scope := accesscontrol.Scope(cmd.Resource, cmd.ResourceAttribute, cmd.ResourceID)
 
 	err := s.sql.WithTransactionalDbSession(ctx, func(sess *db.Session) error {
@@ -84,6 +91,9 @@ func (s *store) SetUserResourcePermission(
 	cmd SetResourcePermissionCommand,
 	hook UserResourceHookFunc,
 ) (*accesscontrol.ResourcePermission, error) {
+	ctx, span := tracer.Start(ctx, "accesscontrol.resourcepermissions.SetUserResourcePermission")
+	defer span.End()
+
 	if usr.ID == 0 {
 		return nil, user.ErrUserNotFound
 	}
@@ -121,6 +131,9 @@ func (s *store) SetTeamResourcePermission(
 	cmd SetResourcePermissionCommand,
 	hook TeamResourceHookFunc,
 ) (*accesscontrol.ResourcePermission, error) {
+	ctx, span := tracer.Start(ctx, "accesscontrol.resourcepermissions.SetTeamResourcePermission")
+	defer span.End()
+
 	if teamID == 0 {
 		return nil, team.ErrTeamNotFound
 	}
@@ -160,6 +173,9 @@ func (s *store) SetBuiltInResourcePermission(
 	cmd SetResourcePermissionCommand,
 	hook BuiltinResourceHookFunc,
 ) (*accesscontrol.ResourcePermission, error) {
+	ctx, span := tracer.Start(ctx, "accesscontrol.resourcepermissions.SetBuiltInResourcePermission")
+	defer span.End()
+
 	if !org.RoleType(builtInRole).IsValid() || builtInRole == accesscontrol.RoleGrafanaAdmin {
 		return nil, fmt.Errorf("invalid role: %s", builtInRole)
 	}
@@ -203,6 +219,9 @@ func (s *store) SetResourcePermissions(
 	commands []SetResourcePermissionsCommand,
 	hooks ResourceHooks,
 ) ([]accesscontrol.ResourcePermission, error) {
+	ctx, span := tracer.Start(ctx, "accesscontrol.resourcepermissions.SetResourcePermissions")
+	defer span.End()
+
 	var err error
 	var permissions []accesscontrol.ResourcePermission
 
@@ -266,7 +285,7 @@ func (s *store) setResourcePermission(
 		return nil, err
 	}
 
-	if err := s.createPermissions(sess, role.ID, cmd.Resource, cmd.ResourceID, cmd.ResourceAttribute, missing); err != nil {
+	if err := s.createPermissions(sess, role.ID, cmd, missing); err != nil {
 		return nil, err
 	}
 
@@ -284,6 +303,9 @@ func (s *store) setResourcePermission(
 }
 
 func (s *store) GetResourcePermissions(ctx context.Context, orgID int64, query GetResourcePermissionsQuery) ([]accesscontrol.ResourcePermission, error) {
+	ctx, span := tracer.Start(ctx, "accesscontrol.resourcepermissions.GetResourcePermissions")
+	defer span.End()
+
 	var result []accesscontrol.ResourcePermission
 
 	err := s.sql.WithDbSession(ctx, func(sess *db.Session) error {
@@ -657,13 +679,19 @@ func (s *store) getPermissions(sess *db.Session, resource, resourceID, resourceA
 	return result, nil
 }
 
-func (s *store) createPermissions(sess *db.Session, roleID int64, resource, resourceID, resourceAttribute string, actions map[string]struct{}) error {
-	if len(actions) == 0 {
-		return nil
-	}
-	permissions := make([]accesscontrol.Permission, 0, len(actions))
-	for action := range actions {
-		p := managedPermission(action, resource, resourceID, resourceAttribute)
+func (s *store) createPermissions(sess *db.Session, roleID int64, cmd SetResourcePermissionCommand, missingActions map[string]struct{}) error {
+	permissions := make([]accesscontrol.Permission, 0, len(missingActions))
+
+	resource := cmd.Resource
+	resourceID := cmd.ResourceID
+	resourceAttribute := cmd.ResourceAttribute
+	permission := cmd.Permission
+	/*
+		Add ACTION SET of managed permissions to in-memory store
+	*/
+	if s.shouldStoreActionSet(resource, permission) {
+		actionSetName := GetActionSetName(resource, permission)
+		p := managedPermission(actionSetName, resource, resourceID, resourceAttribute)
 		p.RoleID = roleID
 		p.Created = time.Now()
 		p.Updated = time.Now()
@@ -671,10 +699,37 @@ func (s *store) createPermissions(sess *db.Session, roleID int64, resource, reso
 		permissions = append(permissions, p)
 	}
 
+	// If there are no missing actions for the resource (in case of access level downgrade or resource removal), we don't need to insert any actions
+	// we still want to add the action set (when permission != "")
+	if len(missingActions) == 0 && !s.shouldStoreActionSet(resource, permission) {
+		return nil
+	}
+
+	// if we have actionset feature enabled and are only working with action sets
+	// skip adding the missing actions to the permissions table
+	if !(s.shouldStoreActionSet(resource, permission) && s.cfg.RBAC.OnlyStoreAccessActionSets) {
+		for action := range missingActions {
+			p := managedPermission(action, resource, resourceID, resourceAttribute)
+			p.RoleID = roleID
+			p.Created = time.Now()
+			p.Updated = time.Now()
+			p.Kind, p.Attribute, p.Identifier = p.SplitScope()
+			permissions = append(permissions, p)
+		}
+	}
+
 	if _, err := sess.InsertMulti(&permissions); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (s *store) shouldStoreActionSet(resource, permission string) bool {
+	if permission == "" {
+		return false
+	}
+	actionSetName := GetActionSetName(resource, permission)
+	return isFolderOrDashboardAction(actionSetName)
 }
 
 func deletePermissions(sess *db.Session, ids []int64) error {
@@ -702,4 +757,80 @@ func managedPermission(action, resource string, resourceID, resourceAttribute st
 		Action: action,
 		Scope:  accesscontrol.Scope(resource, resourceAttribute, resourceID),
 	}
+}
+
+// InMemoryActionSets is an in-memory implementation of the ActionSetStore.
+type InMemoryActionSets struct {
+	features           featuremgmt.FeatureToggles
+	log                log.Logger
+	actionSetToActions map[string][]string
+	actionToActionSets map[string][]string
+}
+
+func NewInMemoryActionSetStore(features featuremgmt.FeatureToggles) *InMemoryActionSets {
+	return &InMemoryActionSets{
+		actionSetToActions: make(map[string][]string),
+		actionToActionSets: make(map[string][]string),
+		log:                log.New("resourcepermissions.actionsets"),
+		features:           features,
+	}
+}
+
+// ResolveActionPrefix returns all action sets that include at least one action with the specified prefix
+func (s *InMemoryActionSets) ResolveActionPrefix(prefix string) []string {
+	if prefix == "" {
+		return []string{}
+	}
+
+	sets := make([]string, 0, len(s.actionSetToActions))
+
+	for set, actions := range s.actionSetToActions {
+		for _, action := range actions {
+			if strings.HasPrefix(action, prefix) {
+				sets = append(sets, set)
+				break
+			}
+		}
+	}
+
+	return sets
+}
+
+func (s *InMemoryActionSets) ResolveAction(action string) []string {
+	return s.actionToActionSets[action]
+}
+
+func (s *InMemoryActionSets) ResolveActionSet(actionSet string) []string {
+	return s.actionSetToActions[actionSet]
+}
+
+func (s *InMemoryActionSets) ExpandActionSetsWithFilter(permissions []accesscontrol.Permission, actionMatcher func(action string) bool) []accesscontrol.Permission {
+	var expandedPermissions []accesscontrol.Permission
+	for _, permission := range permissions {
+		resolvedActions := s.ResolveActionSet(permission.Action)
+		if len(resolvedActions) == 0 {
+			expandedPermissions = append(expandedPermissions, permission)
+			continue
+		}
+		for _, action := range resolvedActions {
+			if !actionMatcher(action) {
+				continue
+			}
+			permission.Action = action
+			expandedPermissions = append(expandedPermissions, permission)
+		}
+	}
+	return expandedPermissions
+}
+
+func (s *InMemoryActionSets) StoreActionSet(name string, actions []string) {
+	s.actionSetToActions[name] = append(s.actionSetToActions[name], actions...)
+
+	for _, action := range actions {
+		if _, ok := s.actionToActionSets[action]; !ok {
+			s.actionToActionSets[action] = []string{}
+		}
+		s.actionToActionSets[action] = append(s.actionToActionSets[action], name)
+	}
+	s.log.Debug("stored action set", "action set name", name)
 }

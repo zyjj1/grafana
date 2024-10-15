@@ -43,6 +43,8 @@ export enum PluginErrorCode {
   missingSignature = 'signatureMissing',
   invalidSignature = 'signatureInvalid',
   modifiedSignature = 'signatureModified',
+  failedBackendStart = 'failedBackendStart',
+  angular = 'angular',
 }
 
 /** Describes error returned from Grafana plugins API call */
@@ -55,6 +57,12 @@ export interface PluginError {
 export interface AngularMeta {
   detected: boolean;
   hideDeprecation: boolean;
+}
+
+// Signals to SystemJS how to load frontend js assets.
+export enum PluginLoadingStrategy {
+  fetch = 'fetch',
+  script = 'script',
 }
 
 export interface PluginMeta<T extends KeyValue = {}> {
@@ -88,6 +96,10 @@ export interface PluginMeta<T extends KeyValue = {}> {
   signatureOrg?: string;
   live?: boolean;
   angular?: AngularMeta;
+  angularDetected?: boolean;
+  loadingStrategy?: PluginLoadingStrategy;
+  extensions?: PluginExtensions;
+  moduleHash?: string;
 }
 
 interface PluginDependencyInfo {
@@ -101,6 +113,38 @@ export interface PluginDependencies {
   grafanaDependency?: string;
   grafanaVersion: string;
   plugins: PluginDependencyInfo[];
+  extensions: {
+    // A list of exposed component IDs
+    exposedComponents: string[];
+  };
+}
+
+export type ExtensionInfo = {
+  targets: string | string[];
+  title: string;
+  description?: string;
+};
+
+export interface PluginExtensions {
+  // The component extensions that the plugin registers
+  addedComponents: ExtensionInfo[];
+
+  // The link extensions that the plugin registers
+  addedLinks: ExtensionInfo[];
+
+  // The React components that the plugin exposes
+  exposedComponents: Array<{
+    id: string;
+    title: string;
+    description?: string;
+  }>;
+
+  // The extension points that the plugin provides
+  extensionPoints: Array<{
+    id: string;
+    title: string;
+    description?: string;
+  }>;
 }
 
 export enum PluginIncludeType {

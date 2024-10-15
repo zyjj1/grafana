@@ -2,18 +2,20 @@ package models
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql/parser"
 )
 
-func ApplyQueryScope(rawExpr string, scope ScopeSpec) (string, error) {
+// ApplyFiltersAndGroupBy takes a raw promQL expression, converts the filters into PromQL matchers, and applies these matchers to the parsed expression. It also applies the group by clause to any aggregate expressions in the parsed expression.
+func ApplyFiltersAndGroupBy(rawExpr string, scopeFilters, adHocFilters []ScopeFilter, groupBy []string) (string, error) {
 	expr, err := parser.ParseExpr(rawExpr)
 	if err != nil {
 		return "", err
 	}
 
-	matchers, err := scopeFiltersToMatchers(scope.Filters)
+	matchers, err := FiltersToMatchers(scopeFilters, adHocFilters)
 	if err != nil {
 		return "", err
 	}
@@ -50,7 +52,17 @@ func ApplyQueryScope(rawExpr string, scope ScopeSpec) (string, error) {
 			}
 
 			return nil
-
+		case *parser.AggregateExpr:
+			found := make(map[string]bool)
+			for _, lName := range v.Grouping {
+				found[lName] = true
+			}
+			for _, k := range groupBy {
+				if !found[k] {
+					v.Grouping = append(v.Grouping, k)
+				}
+			}
+			return nil
 		default:
 			return nil
 		}
@@ -58,27 +70,47 @@ func ApplyQueryScope(rawExpr string, scope ScopeSpec) (string, error) {
 	return expr.String(), nil
 }
 
-func scopeFiltersToMatchers(filters []ScopeFilter) ([]*labels.Matcher, error) {
-	matchers := make([]*labels.Matcher, 0, len(filters))
-	for _, f := range filters {
-		var mt labels.MatchType
-		switch f.Operator {
-		case FilterOperatorEquals:
-			mt = labels.MatchEqual
-		case FilterOperatorNotEquals:
-			mt = labels.MatchNotEqual
-		case FilterOperatorRegexMatch:
-			mt = labels.MatchRegexp
-		case FilterOperatorRegexNotMatch:
-			mt = labels.MatchNotRegexp
-		default:
-			return nil, fmt.Errorf("unknown operator %q", f.Operator)
-		}
-		m, err := labels.NewMatcher(mt, f.Key, f.Value)
+func FiltersToMatchers(scopeFilters, adhocFilters []ScopeFilter) ([]*labels.Matcher, error) {
+	filterMap := make(map[string]*labels.Matcher)
+
+	for _, filter := range append(scopeFilters, adhocFilters...) {
+		matcher, err := filterToMatcher(filter)
 		if err != nil {
 			return nil, err
 		}
-		matchers = append(matchers, m)
+		filterMap[filter.Key] = matcher
 	}
+
+	matchers := make([]*labels.Matcher, 0, len(filterMap))
+	for _, matcher := range filterMap {
+		matchers = append(matchers, matcher)
+	}
+
 	return matchers, nil
+}
+
+func filterToMatcher(f ScopeFilter) (*labels.Matcher, error) {
+	var mt labels.MatchType
+	switch f.Operator {
+	case FilterOperatorEquals:
+		mt = labels.MatchEqual
+	case FilterOperatorNotEquals:
+		mt = labels.MatchNotEqual
+	case FilterOperatorRegexMatch:
+		mt = labels.MatchRegexp
+	case FilterOperatorRegexNotMatch:
+		mt = labels.MatchNotRegexp
+	case FilterOperatorOneOf:
+		mt = labels.MatchRegexp
+	case FilterOperatorNotOneOf:
+		mt = labels.MatchNotRegexp
+	default:
+		return nil, fmt.Errorf("unknown operator %q", f.Operator)
+	}
+	if f.Operator == FilterOperatorOneOf || f.Operator == FilterOperatorNotOneOf {
+		if len(f.Values) > 0 {
+			return labels.NewMatcher(mt, f.Key, strings.Join(f.Values, "|"))
+		}
+	}
+	return labels.NewMatcher(mt, f.Key, f.Value)
 }

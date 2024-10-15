@@ -16,6 +16,7 @@ import {
 import { ParserAndLabelKeysResult, LokiQuery, LokiQueryType, LabelType } from './types';
 
 const NS_IN_MS = 1000000;
+const EMPTY_SELECTOR = '{}';
 
 export default class LokiLanguageProvider extends LanguageProvider {
   labelKeys: string[];
@@ -30,6 +31,7 @@ export default class LokiLanguageProvider extends LanguageProvider {
    */
   private seriesCache = new LRUCache<string, Record<string, string[]>>({ max: 10 });
   private labelsCache = new LRUCache<string, string[]>({ max: 10 });
+  private labelsPromisesCache = new LRUCache<string, Promise<string[]>>({ max: 10 });
 
   constructor(datasource: LokiDatasource, initialValues?: any) {
     super();
@@ -40,7 +42,7 @@ export default class LokiLanguageProvider extends LanguageProvider {
     Object.assign(this, initialValues);
   }
 
-  request = async (url: string, params?: any) => {
+  request = async (url: string, params?: Record<string, string | number>) => {
     try {
       return await this.datasource.metadataRequest(url, params);
     } catch (error) {
@@ -119,6 +121,28 @@ export default class LokiLanguageProvider extends LanguageProvider {
   }
 
   /**
+   * Fetch label keys using the best applicable endpoint.
+   *
+   * This asynchronous function returns all available label keys from the data source.
+   * It returns a promise that resolves to an array of strings containing the label keys.
+   *
+   * @param options - (Optional) An object containing additional options.
+   * @param options.streamSelector - (Optional) The stream selector to filter label keys. If not provided, all label keys are fetched.
+   * @param options.timeRange - (Optional) The time range for which you want to retrieve label keys. If not provided, the default time range is used.
+   * @returns A promise containing an array of label keys.
+   * @throws An error if the fetch operation fails.
+   */
+  async fetchLabels(options?: { streamSelector?: string; timeRange?: TimeRange }): Promise<string[]> {
+    // If there is no stream selector - use /labels endpoint (https://github.com/grafana/loki/pull/11982)
+    if (!options || !options.streamSelector) {
+      return this.fetchLabelsByLabelsEndpoint(options);
+    } else {
+      const data = await this.fetchSeriesLabels(options.streamSelector, { timeRange: options.timeRange });
+      return Object.keys(data ?? {});
+    }
+  }
+
+  /**
    * Fetch all label keys
    * This asynchronous function returns all available label keys from the data source.
    * It returns a promise that resolves to an array of strings containing the label keys.
@@ -128,7 +152,7 @@ export default class LokiLanguageProvider extends LanguageProvider {
    * @returns A promise containing an array of label keys.
    * @throws An error if the fetch operation fails.
    */
-  async fetchLabels(options?: { timeRange?: TimeRange }): Promise<string[]> {
+  private async fetchLabelsByLabelsEndpoint(options?: { timeRange?: TimeRange }): Promise<string[]> {
     const url = 'labels';
     const range = options?.timeRange ?? this.getDefaultTimeRange();
     const timeRange = this.datasource.getTimeRangeParams(range);
@@ -229,9 +253,11 @@ export default class LokiLanguageProvider extends LanguageProvider {
     options?: { streamSelector?: string; timeRange?: TimeRange }
   ): Promise<string[]> {
     const label = encodeURIComponent(this.datasource.interpolateString(labelName));
-    const streamParam = options?.streamSelector
-      ? encodeURIComponent(this.datasource.interpolateString(options.streamSelector))
-      : undefined;
+    // Loki doesn't allow empty streamSelector {}, so we should not send it.
+    const streamParam =
+      options?.streamSelector && options.streamSelector !== EMPTY_SELECTOR
+        ? this.datasource.interpolateString(options.streamSelector)
+        : undefined;
 
     const url = `label/${label}/values`;
     const range = options?.timeRange ?? this.getDefaultTimeRange();
@@ -247,18 +273,34 @@ export default class LokiLanguageProvider extends LanguageProvider {
 
     const cacheKey = this.generateCacheKey(url, start, end, paramCacheKey);
 
-    let labelValues = this.labelsCache.get(cacheKey);
-    if (!labelValues) {
-      // Clear value when requesting new one. Empty object being truthy also makes sure we don't request twice.
-      this.labelsCache.set(cacheKey, []);
-      const res = await this.request(url, params);
-      if (Array.isArray(res)) {
-        labelValues = res.slice().sort();
-        this.labelsCache.set(cacheKey, labelValues);
-      }
+    // Values in cache, return
+    const labelValues = this.labelsCache.get(cacheKey);
+    if (labelValues) {
+      return labelValues;
     }
 
-    return labelValues ?? [];
+    // Promise in cache, return
+    let labelValuesPromise = this.labelsPromisesCache.get(cacheKey);
+    if (labelValuesPromise) {
+      return labelValuesPromise;
+    }
+
+    labelValuesPromise = new Promise(async (resolve) => {
+      try {
+        const data = await this.request(url, params);
+        if (Array.isArray(data)) {
+          const labelValues = data.slice().sort();
+          this.labelsCache.set(cacheKey, labelValues);
+          this.labelsPromisesCache.delete(cacheKey);
+          resolve(labelValues);
+        }
+      } catch (error) {
+        console.error(error);
+        resolve([]);
+      }
+    });
+    this.labelsPromisesCache.set(cacheKey, labelValuesPromise);
+    return labelValuesPromise;
   }
 
   /**

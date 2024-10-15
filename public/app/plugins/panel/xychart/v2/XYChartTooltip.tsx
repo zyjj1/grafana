@@ -1,15 +1,14 @@
-import React, { ReactNode } from 'react';
+import { ReactNode } from 'react';
 
-import { DataFrame } from '@grafana/data';
+import { DataFrame, InterpolateFunction } from '@grafana/data';
 import { alpha } from '@grafana/data/src/themes/colorManipulator';
-import { useStyles2 } from '@grafana/ui';
 import { VizTooltipContent } from '@grafana/ui/src/components/VizTooltip/VizTooltipContent';
 import { VizTooltipFooter } from '@grafana/ui/src/components/VizTooltip/VizTooltipFooter';
 import { VizTooltipHeader } from '@grafana/ui/src/components/VizTooltip/VizTooltipHeader';
+import { VizTooltipWrapper } from '@grafana/ui/src/components/VizTooltip/VizTooltipWrapper';
 import { ColorIndicator, VizTooltipItem } from '@grafana/ui/src/components/VizTooltip/types';
 
-import { getDataLinks } from '../../status-history/utils';
-import { getStyles } from '../../timeseries/TimeSeriesTooltip';
+import { getDataLinks, getFieldActions } from '../../status-history/utils';
 
 import { XYSeries } from './types2';
 import { fmt } from './utils';
@@ -21,16 +20,26 @@ export interface Props {
   dismiss: () => void;
   data: DataFrame[];
   xySeries: XYSeries[];
+  replaceVariables: InterpolateFunction;
 }
 
-export const XYChartTooltip = ({ dataIdxs, seriesIdx, data, xySeries, dismiss, isPinned }: Props) => {
-  const styles = useStyles2(getStyles);
+function stripSeriesName(fieldName: string, seriesName: string) {
+  if (fieldName !== seriesName && fieldName.includes(' ')) {
+    fieldName = fieldName.replace(seriesName, '').trim();
+  }
 
+  return fieldName;
+}
+
+export const XYChartTooltip = ({ dataIdxs, seriesIdx, data, xySeries, dismiss, isPinned, replaceVariables }: Props) => {
   const rowIndex = dataIdxs.find((idx) => idx !== null)!;
 
   const series = xySeries[seriesIdx! - 1];
   const xField = series.x.field;
   const yField = series.y.field;
+
+  const sizeField = series.size.field;
+  const colorField = series.color.field;
 
   let label = series.name.value;
 
@@ -45,24 +54,39 @@ export const XYChartTooltip = ({ dataIdxs, seriesIdx, data, xySeries, dismiss, i
   const headerItem: VizTooltipItem = {
     label,
     value: '',
-    color: alpha(seriesColor!, 0.5),
+    color: alpha(seriesColor ?? '#fff', 0.5),
     colorIndicator: ColorIndicator.marker_md,
   };
 
   const contentItems: VizTooltipItem[] = [
     {
-      label: xField.state?.displayName ?? xField.name,
+      label: stripSeriesName(xField.state?.displayName ?? xField.name, label),
       value: fmt(xField, xField.values[rowIndex]),
     },
     {
-      label: yField.state?.displayName ?? yField.name,
+      label: stripSeriesName(yField.state?.displayName ?? yField.name, label),
       value: fmt(yField, yField.values[rowIndex]),
     },
   ];
 
+  // mapped fields for size/color
+  if (sizeField != null && sizeField !== yField) {
+    contentItems.push({
+      label: stripSeriesName(sizeField.state?.displayName ?? sizeField.name, label),
+      value: fmt(sizeField, sizeField.values[rowIndex]),
+    });
+  }
+
+  if (colorField != null && colorField !== yField) {
+    contentItems.push({
+      label: stripSeriesName(colorField.state?.displayName ?? colorField.name, label),
+      value: fmt(colorField, colorField.values[rowIndex]),
+    });
+  }
+
   series._rest.forEach((field) => {
     contentItems.push({
-      label: field.state?.displayName ?? field.name,
+      label: stripSeriesName(field.state?.displayName ?? field.name, label),
       value: fmt(field, field.values[rowIndex]),
     });
   });
@@ -71,15 +95,17 @@ export const XYChartTooltip = ({ dataIdxs, seriesIdx, data, xySeries, dismiss, i
 
   if (isPinned && seriesIdx != null) {
     const links = getDataLinks(yField, rowIndex);
+    const yFieldFrame = data.find((frame) => frame.fields.includes(yField))!;
+    const actions = getFieldActions(yFieldFrame, yField, replaceVariables);
 
-    footer = <VizTooltipFooter dataLinks={links} />;
+    footer = <VizTooltipFooter dataLinks={links} actions={actions} />;
   }
 
   return (
-    <div className={styles.wrapper}>
+    <VizTooltipWrapper>
       <VizTooltipHeader item={headerItem} isPinned={isPinned} />
       <VizTooltipContent items={contentItems} isPinned={isPinned} />
       {footer}
-    </div>
+    </VizTooltipWrapper>
   );
 };

@@ -18,6 +18,8 @@ type Scheduler struct {
 	EvalTotal                           *prometheus.CounterVec
 	EvalFailures                        *prometheus.CounterVec
 	EvalDuration                        *prometheus.HistogramVec
+	EvalAttemptTotal                    *prometheus.CounterVec
+	EvalAttemptFailures                 *prometheus.CounterVec
 	ProcessDuration                     *prometheus.HistogramVec
 	SendDuration                        *prometheus.HistogramVec
 	SimpleNotificationRules             *prometheus.GaugeVec
@@ -29,6 +31,7 @@ type Scheduler struct {
 	UpdateSchedulableAlertRulesDuration prometheus.Histogram
 	Ticker                              *ticker.Metrics
 	EvaluationMissed                    *prometheus.CounterVec
+	SimplifiedEditorRules               *prometheus.GaugeVec
 }
 
 func NewSchedulerMetrics(r prometheus.Registerer) *Scheduler {
@@ -72,6 +75,24 @@ func NewSchedulerMetrics(r prometheus.Registerer) *Scheduler {
 			},
 			[]string{"org"},
 		),
+		EvalAttemptTotal: promauto.With(r).NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: Namespace,
+				Subsystem: Subsystem,
+				Name:      "rule_evaluation_attempts_total",
+				Help:      "The total number of rule evaluation attempts.",
+			},
+			[]string{"org"},
+		),
+		EvalAttemptFailures: promauto.With(r).NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: Namespace,
+				Subsystem: Subsystem,
+				Name:      "rule_evaluation_attempt_failures_total",
+				Help:      "The total number of rule evaluation attempt failures.",
+			},
+			[]string{"org"},
+		),
 		ProcessDuration: promauto.With(r).NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: Namespace,
@@ -101,15 +122,14 @@ func NewSchedulerMetrics(r prometheus.Registerer) *Scheduler {
 			},
 			[]string{"org"},
 		),
-		// TODO: partition on rule group as well as tenant, similar to loki|cortex.
 		GroupRules: promauto.With(r).NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: Namespace,
 				Subsystem: Subsystem,
 				Name:      "rule_group_rules",
-				Help:      "The number of alert rules that are scheduled, both active and paused.",
+				Help:      "The number of alert rules that are scheduled, by type and state.",
 			},
-			[]string{"org", "state"},
+			[]string{"org", "type", "state", "rule_group"},
 		),
 		Groups: promauto.With(r).NewGaugeVec(
 			prometheus.GaugeOpts{
@@ -162,6 +182,15 @@ func NewSchedulerMetrics(r prometheus.Registerer) *Scheduler {
 				Help:      "The total number of rule evaluations missed due to a slow rule evaluation.",
 			},
 			[]string{"org", "name"},
+		),
+		SimplifiedEditorRules: promauto.With(r).NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: Namespace,
+				Subsystem: Subsystem,
+				Name:      "simplified_editor_rules",
+				Help:      "The number of alert rules using simplified editor settings.",
+			},
+			[]string{"org", "setting"},
 		),
 	}
 }

@@ -1,4 +1,6 @@
-import React, { SyntheticEvent } from 'react';
+// Core Grafana history https://github.com/grafana/grafana/blob/v11.0.0-preview/public/app/plugins/datasource/prometheus/querybuilder/components/PromQueryBuilderOptions.tsx
+import { SyntheticEvent } from 'react';
+import * as React from 'react';
 
 import { CoreApp, SelectableValue } from '@grafana/data';
 import { selectors } from '@grafana/e2e-selectors';
@@ -90,7 +92,7 @@ export const PromQueryBuilderOptions = React.memo<PromQueryBuilderOptionsProps>(
                 minWidth={10}
                 onCommitChange={onChangeStep}
                 defaultValue={query.interval}
-                id={selectors.components.DataSource.Prometheus.queryEditor.step}
+                data-test-id="prometheus-step"
               />
             </EditorField>
             <EditorField label="Format">
@@ -110,7 +112,7 @@ export const PromQueryBuilderOptions = React.memo<PromQueryBuilderOptionsProps>(
                 <EditorSwitch
                   value={query.exemplar || false}
                   onChange={onExemplarChange}
-                  id={selectors.components.DataSource.Prometheus.queryEditor.exemplars}
+                  data-test-id="prometheus-exemplars"
                 />
               </EditorField>
             )}

@@ -1,5 +1,4 @@
-import React, { useMemo } from 'react';
-import { UseTableRowProps } from 'react-table';
+import { useMemo } from 'react';
 
 import {
   Avatar,
@@ -55,7 +54,7 @@ export const UsersTable = ({
         header: 'Login',
         cell: ({ row: { original } }: Cell<'login'>) => {
           return (
-            <TextLink color="primary" inline={false} href={`admin/users/edit/${original.id}`} title="Edit user">
+            <TextLink color="primary" inline={false} href={`/admin/users/edit/${original.id}`} title="Edit user">
               {original.login}
             </TextLink>
           );
@@ -91,8 +90,6 @@ export const UsersTable = ({
                   </Stack>
                 );
               },
-              sortType: (a: UseTableRowProps<UserDTO>, b: UseTableRowProps<UserDTO>) =>
-                (a.original.orgs?.length || 0) - (b.original.orgs?.length || 0),
             },
           ]
         : []),
@@ -113,8 +110,6 @@ export const UsersTable = ({
                   value
                 );
               },
-              // Needs the assertion here, the types are not inferred correctly due to the  conditional assignment
-              sortType: 'string' as const,
             },
           ]
         : []),

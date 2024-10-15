@@ -4,6 +4,7 @@ import {
   DataFrameJSON,
   DataQueryRequest,
   DataQueryResponse,
+  LiveChannelEvent,
   LiveChannelScope,
   LoadingState,
   StreamingDataFrame,
@@ -43,8 +44,8 @@ export function doLokiChannelStream(
   }
 
   let frame: StreamingDataFrame | undefined = undefined;
-  const updateFrame = (msg: any) => {
-    if (msg?.message) {
+  const updateFrame = (msg: LiveChannelEvent<unknown>) => {
+    if ('message' in msg && msg.message) {
       const p: DataFrameJSON = msg.message;
       if (!frame) {
         frame = StreamingDataFrame.fromDataFrameJSON(p, {
@@ -62,7 +63,7 @@ export function doLokiChannelStream(
   return defer(() => getLiveStreamKey(query)).pipe(
     mergeMap((key) => {
       return getGrafanaLiveSrv()
-        .getStream<any>({
+        .getStream({
           scope: LiveChannelScope.DataSource,
           namespace: ds.uid,
           path: `tail/${key}`,

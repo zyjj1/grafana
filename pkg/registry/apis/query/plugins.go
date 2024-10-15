@@ -3,14 +3,12 @@ package query
 import (
 	"context"
 
+	"github.com/grafana/grafana/pkg/apimachinery/utils"
+	query "github.com/grafana/grafana/pkg/apis/query/v0alpha1"
 	"k8s.io/apimachinery/pkg/apis/meta/internalversion"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/registry/rest"
-
-	common "github.com/grafana/grafana/pkg/apimachinery/apis/common/v0alpha1"
-	example "github.com/grafana/grafana/pkg/apis/example/v0alpha1"
-	query "github.com/grafana/grafana/pkg/apis/query/v0alpha1"
 )
 
 var (
@@ -21,9 +19,12 @@ var (
 )
 
 type pluginsStorage struct {
-	resourceInfo   *common.ResourceInfo
+	resourceInfo   *utils.ResourceInfo
 	tableConverter rest.TableConvertor
 	registry       query.DataSourceApiServerRegistry
+
+	// Always return an empty list regardless what we think exists
+	returnEmptyList bool
 }
 
 func newPluginsStorage(reg query.DataSourceApiServerRegistry) *pluginsStorage {
@@ -46,7 +47,7 @@ func (s *pluginsStorage) NamespaceScoped() bool {
 }
 
 func (s *pluginsStorage) GetSingularName() string {
-	return example.DummyResourceInfo.GetSingularName()
+	return s.resourceInfo.GetSingularName()
 }
 
 func (s *pluginsStorage) NewList() runtime.Object {
@@ -58,5 +59,8 @@ func (s *pluginsStorage) ConvertToTable(ctx context.Context, object runtime.Obje
 }
 
 func (s *pluginsStorage) List(ctx context.Context, options *internalversion.ListOptions) (runtime.Object, error) {
+	if s.returnEmptyList {
+		return s.NewList(), nil
+	}
 	return s.registry.GetDatasourceApiServers(ctx)
 }

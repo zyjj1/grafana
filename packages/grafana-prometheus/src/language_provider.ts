@@ -1,3 +1,4 @@
+// Core Grafana history https://github.com/grafana/grafana/blob/v11.0.0-preview/public/app/plugins/datasource/prometheus/language_provider.ts
 import { once } from 'lodash';
 import Prism from 'prismjs';
 
@@ -5,12 +6,17 @@ import {
   AbstractLabelMatcher,
   AbstractLabelOperator,
   AbstractQuery,
+  AdHocVariableFilter,
   getDefaultTimeRange,
   LanguageProvider,
+  Scope,
+  scopeFilterOperatorMap,
+  ScopeSpecFilter,
   TimeRange,
 } from '@grafana/data';
 import { BackendSrvRequest } from '@grafana/runtime';
 
+import { DEFAULT_SERIES_LIMIT, REMOVE_SERIES_LIMIT } from './components/PrometheusMetricsBrowser';
 import { Label } from './components/monaco-query-field/monaco-completion-provider/situation';
 import { PrometheusDatasource } from './datasource';
 import {
@@ -21,12 +27,20 @@ import {
   toPromLikeQuery,
 } from './language_utils';
 import PromqlSyntax from './promql';
+import { buildVisualQueryFromString } from './querybuilder/parsing';
 import { PrometheusCacheLevel, PromMetricsMetadata, PromQuery } from './types';
 
 const DEFAULT_KEYS = ['job', 'instance'];
 const EMPTY_SELECTOR = '{}';
 // Max number of items (metrics, labels, values) that we display as suggestions. Prevents from running out of memory.
 export const SUGGESTIONS_LIMIT = 10000;
+
+type UrlParamsType = {
+  start?: string;
+  end?: string;
+  'match[]'?: string;
+  limit?: string;
+};
 
 const buildCacheHeaders = (durationInSeconds: number) => {
   return {
@@ -101,12 +115,14 @@ export default class PromQlLanguageProvider extends LanguageProvider {
     return PromqlSyntax;
   }
 
-  request = async (url: string, defaultValue: any, params = {}, options?: Partial<BackendSrvRequest>): Promise<any> => {
+  request = async (url: string, defaultValue: any, params = {}, options?: Partial<BackendSrvRequest>) => {
     try {
       const res = await this.datasource.metadataRequest(url, params, options);
       return res.data.data;
     } catch (error) {
-      console.error(error);
+      if (!isCancelledError(error)) {
+        console.error(error);
+      }
     }
 
     return defaultValue;
@@ -177,7 +193,7 @@ export default class PromQlLanguageProvider extends LanguageProvider {
       if (selector === EMPTY_SELECTOR) {
         return await this.fetchDefaultSeries();
       } else {
-        return await this.fetchSeriesLabels(selector, withName);
+        return await this.fetchSeriesLabels(selector, withName, REMOVE_SERIES_LIMIT);
       }
     } catch (error) {
       // TODO: better error handling
@@ -204,21 +220,38 @@ export default class PromQlLanguageProvider extends LanguageProvider {
   /**
    * Fetches all label keys
    */
-  async fetchLabels(timeRange?: TimeRange): Promise<string[]> {
+  fetchLabels = async (timeRange?: TimeRange, queries?: PromQuery[]): Promise<string[]> => {
     if (timeRange) {
       this.timeRange = timeRange;
     }
-    const url = '/api/v1/labels';
-    const params = this.datasource.getAdjustedInterval(this.timeRange);
+    let url = '/api/v1/labels';
+    const timeParams = this.datasource.getAdjustedInterval(this.timeRange);
     this.labelFetchTs = Date.now().valueOf();
 
-    const res = await this.request(url, [], params, this.getDefaultCacheHeaders());
+    const searchParams = new URLSearchParams({ ...timeParams });
+    queries?.forEach((q) => {
+      const visualQuery = buildVisualQueryFromString(q.expr);
+      if (visualQuery.query.metric !== '') {
+        searchParams.append('match[]', visualQuery.query.metric);
+        if (visualQuery.query.binaryQueries) {
+          visualQuery.query.binaryQueries.forEach((bq) => {
+            searchParams.append('match[]', bq.query.metric);
+          });
+        }
+      }
+    });
+
+    if (this.datasource.httpMethod === 'GET') {
+      url += `?${searchParams.toString()}`;
+    }
+
+    const res = await this.request(url, [], searchParams, this.getDefaultCacheHeaders());
     if (Array.isArray(res)) {
       this.labelKeys = res.slice().sort();
     }
 
     return [];
-  }
+  };
 
   /**
    * Gets series values
@@ -240,10 +273,12 @@ export default class PromQlLanguageProvider extends LanguageProvider {
    * @param name
    * @param match
    * @param timeRange
+   * @param requestId
    */
   fetchSeriesValuesWithMatch = async (
     name: string,
-    match?: string,
+    match: string,
+    requestId?: string,
     timeRange: TimeRange = this.timeRange
   ): Promise<string[]> => {
     const interpolatedName = name ? this.datasource.interpolateString(name) : null;
@@ -253,13 +288,16 @@ export default class PromQlLanguageProvider extends LanguageProvider {
       ...range,
       ...(interpolatedMatch && { 'match[]': interpolatedMatch }),
     };
+    let requestOptions: Partial<BackendSrvRequest> | undefined = {
+      ...this.getDefaultCacheHeaders(),
+      ...(requestId && { requestId }),
+    };
 
-    const value = await this.request(
-      `/api/v1/label/${interpolatedName}/values`,
-      [],
-      urlParams,
-      this.getDefaultCacheHeaders()
-    );
+    if (!Object.keys(requestOptions).length) {
+      requestOptions = undefined;
+    }
+
+    const value = await this.request(`/api/v1/label/${interpolatedName}/values`, [], urlParams, requestOptions);
     return value ?? [];
   };
 
@@ -299,7 +337,7 @@ export default class PromQlLanguageProvider extends LanguageProvider {
     if (this.datasource.hasLabelsMatchAPISupport()) {
       return this.fetchSeriesLabelsMatch(name, withName);
     } else {
-      return this.fetchSeriesLabels(name, withName);
+      return this.fetchSeriesLabels(name, withName, REMOVE_SERIES_LIMIT);
     }
   };
 
@@ -308,14 +346,24 @@ export default class PromQlLanguageProvider extends LanguageProvider {
    * they can change over requested time.
    * @param name
    * @param withName
+   * @param withLimit
    */
-  fetchSeriesLabels = async (name: string, withName?: boolean): Promise<Record<string, string[]>> => {
+  fetchSeriesLabels = async (
+    name: string,
+    withName?: boolean,
+    withLimit?: string
+  ): Promise<Record<string, string[]>> => {
     const interpolatedName = this.datasource.interpolateString(name);
     const range = this.datasource.getAdjustedInterval(this.timeRange);
-    const urlParams = {
+    let urlParams: UrlParamsType = {
       ...range,
       'match[]': interpolatedName,
     };
+
+    if (withLimit !== 'none') {
+      urlParams = { ...urlParams, limit: withLimit ?? DEFAULT_SERIES_LIMIT };
+    }
+
     const url = `/api/v1/series`;
 
     const data = await this.request(url, [], urlParams, this.getDefaultCacheHeaders());
@@ -363,9 +411,72 @@ export default class PromQlLanguageProvider extends LanguageProvider {
     const values = await Promise.all(DEFAULT_KEYS.map((key) => this.fetchLabelValues(key)));
     return DEFAULT_KEYS.reduce((acc, key, i) => ({ ...acc, [key]: values[i] }), {});
   });
+
+  /**
+   * Fetch labels or values for a label based on the queries, scopes, filters and time range
+   * @param timeRange
+   * @param queries
+   * @param scopes
+   * @param adhocFilters
+   * @param labelName
+   * @param limit
+   * @param requestId
+   */
+  fetchSuggestions = async (
+    timeRange?: TimeRange,
+    queries?: PromQuery[],
+    scopes?: Scope[],
+    adhocFilters?: AdHocVariableFilter[],
+    labelName?: string,
+    limit?: number,
+    requestId?: string
+  ): Promise<string[]> => {
+    if (timeRange) {
+      this.timeRange = timeRange;
+    }
+
+    const url = '/suggestions';
+    const timeParams = this.datasource.getAdjustedInterval(this.timeRange);
+    const value = await this.request(
+      url,
+      [],
+      {
+        labelName,
+        queries: queries?.map((q) =>
+          this.datasource.interpolateString(q.expr, {
+            ...this.datasource.getIntervalVars(),
+            ...this.datasource.getRangeScopedVars(this.timeRange),
+          })
+        ),
+        scopes: scopes?.reduce<ScopeSpecFilter[]>((acc, scope) => {
+          acc.push(...scope.spec.filters);
+
+          return acc;
+        }, []),
+        adhocFilters: adhocFilters?.map((filter) => ({
+          key: filter.key,
+          operator: scopeFilterOperatorMap[filter.operator],
+          value: filter.value,
+          values: filter.values,
+        })),
+        limit,
+        ...timeParams,
+      },
+      {
+        ...(requestId && { requestId }),
+        headers: {
+          ...this.getDefaultCacheHeaders()?.headers,
+          'Content-Type': 'application/json',
+        },
+        method: 'POST',
+      }
+    );
+
+    return value ?? [];
+  };
 }
 
-function getNameLabelValue(promQuery: string, tokens: any): string {
+function getNameLabelValue(promQuery: string, tokens: Array<string | Prism.Token>): string {
   let nameLabelValue = '';
 
   for (const token of tokens) {
@@ -375,4 +486,10 @@ function getNameLabelValue(promQuery: string, tokens: any): string {
     }
   }
   return nameLabelValue;
+}
+
+function isCancelledError(error: unknown): error is {
+  cancelled: boolean;
+} {
+  return typeof error === 'object' && error !== null && 'cancelled' in error && error.cancelled === true;
 }

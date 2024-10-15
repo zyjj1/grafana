@@ -1,7 +1,8 @@
 // Libraries
 import { isNumber } from 'lodash';
 
-import { NullValueMode, Field, FieldCalcs, FieldType } from '../types/index';
+import { NullValueMode } from '../types/data';
+import { Field, FieldCalcs, FieldType } from '../types/dataFrame';
 import { Registry, RegistryItem } from '../utils/Registry';
 
 export enum ReducerID {
@@ -13,6 +14,7 @@ export enum ReducerID {
   variance = 'variance',
   stdDev = 'stdDev',
   last = 'last',
+  median = 'median',
   first = 'first',
   count = 'count',
   range = 'range',
@@ -278,6 +280,14 @@ export const fieldReducers = new Registry<FieldReducerInfo>(() => [
     preservesUnits: true,
   },
   {
+    id: ReducerID.median,
+    name: 'Median',
+    description: 'Median Value',
+    standard: true,
+    aliasIds: ['median'],
+    preservesUnits: true,
+  },
+  {
     id: ReducerID.variance,
     name: 'Variance',
     description: 'Variance of all values in a field',
@@ -402,27 +412,34 @@ export const fieldReducers = new Registry<FieldReducerInfo>(() => [
     }),
     preservesUnits: false,
   },
+  ...buildPercentileReducers(),
 ]);
 
-for (let i = 1; i < 100; i++) {
-  const percentile = i / 100;
-  const id = `p${i}` as ReducerID;
+// This `Array.from` will build an array of elements from 1 to 99
+const buildPercentileReducers = (percentiles = [...Array.from({ length: 99 }, (_, i) => i + 1)]) => {
+  const percentileReducers: FieldReducerInfo[] = [];
   const nth = (n: number) =>
     n > 3 && n < 21 ? 'th' : n % 10 === 1 ? 'st' : n % 10 === 2 ? 'nd' : n % 10 === 3 ? 'rd' : 'th';
-  const name = `${i}${nth(i)} percentile`;
-  const description = `${i}${nth(i)} percentile value`;
 
-  fieldReducers.register({
-    id: id,
-    name: name,
-    description: description,
-    standard: false,
-    reduce: (field: Field, ignoreNulls: boolean, nullAsZero: boolean): FieldCalcs => {
-      return { [id]: calculatePercentile(field, percentile, ignoreNulls, nullAsZero) };
-    },
-    preservesUnits: true,
+  percentiles.forEach((p) => {
+    const percentile = p / 100;
+    const id = `p${p}`;
+    const name = `${p}${nth(p)} %`;
+    const description = `${p}${nth(p)} percentile value`;
+
+    percentileReducers.push({
+      id: id,
+      name: name,
+      description: description,
+      standard: false,
+      reduce: (field: Field, ignoreNulls: boolean, nullAsZero: boolean): FieldCalcs => {
+        return { [id]: calculatePercentile(field, percentile, ignoreNulls, nullAsZero) };
+      },
+      preservesUnits: true,
+    });
   });
-}
+  return percentileReducers;
+};
 
 // Used for test cases
 export const defaultCalcs: FieldCalcs = {
@@ -565,7 +582,7 @@ export function doStandardCalcs(field: Field, ignoreNulls: boolean, nullAsZero: 
   }
 
   if (isNumber(calcs.firstNotNull) && isNumber(calcs.diff)) {
-    calcs.diffperc = calcs.diff / calcs.firstNotNull;
+    calcs.diffperc = (calcs.diff / calcs.firstNotNull) * 100;
   }
   return calcs;
 }

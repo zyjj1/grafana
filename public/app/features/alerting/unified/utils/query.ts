@@ -1,9 +1,9 @@
 import { produce } from 'immer';
 
 import { DataSourceInstanceSettings } from '@grafana/data';
+import { PromQuery } from '@grafana/prometheus';
 import { DataQuery } from '@grafana/schema';
 import { LokiQuery } from 'app/plugins/datasource/loki/types';
-import { PromQuery } from 'app/plugins/datasource/prometheus/types';
 import { CombinedRule } from 'app/types/unified-alerting';
 import { AlertQuery } from 'app/types/unified-alerting-dto';
 
@@ -20,7 +20,7 @@ export function alertRuleToQueries(combinedRule: CombinedRule | undefined | null
 
   if (isGrafanaRulerRule(rulerRule)) {
     const query = rulerRule.grafana_alert.data;
-    return widenRelativeTimeRanges(query, rulerRule.for, combinedRule.group.interval);
+    return widenRelativeTimeRanges(query, rulerRule.for ?? '', combinedRule.group.interval);
   }
 
   if (isCloudRulesSource(rulesSource)) {

@@ -1,4 +1,4 @@
-import { DashboardPage, expect, test } from '@grafana/plugin-e2e';
+import { expect, test } from '@grafana/plugin-e2e';
 
 import { formatExpectError } from '../errors';
 import { successfulDataQuery } from '../mocks/queries';
@@ -8,6 +8,7 @@ const PANEL_TITLE = 'Table panel E2E test';
 const TABLE_VIZ_NAME = 'Table';
 const STANDARD_OTIONS_CATEGORY = 'Standard options';
 const DISPLAY_NAME_LABEL = 'Display name';
+const REACT_TABLE_DASHBOARD = { uid: 'U_bZIMRMk' };
 
 test.describe('query editor query data', () => {
   test('query data response should be OK when query is valid', async ({ panelEditPage }) => {
@@ -40,7 +41,7 @@ test.describe('query editor with mocked responses', () => {
     const queryEditorRow = await panelEditPage.getQueryEditorRow('A');
     await queryEditorRow.getByLabel('Scenario').last().click();
     await expect(
-      panelEditPage.getByTestIdOrAriaLabel(selectors.components.Select.option),
+      panelEditPage.getByGrafanaSelector(selectors.components.Select.option),
       formatExpectError('Expected certain select options to be displayed after clicking on the select input')
     ).toHaveText(scenarios.map((s) => s.name));
   });
@@ -55,7 +56,7 @@ test.describe('query editor with mocked responses', () => {
       formatExpectError('Did not expect panel error to be displayed after query execution')
     ).not.toBeVisible();
     await expect(
-      panelEditPage.getByTestIdOrAriaLabel(selectors.components.Panels.Visualization.Table.body),
+      panelEditPage.getByGrafanaSelector(selectors.components.Panels.Visualization.Table.body),
       formatExpectError('Expected certain select options to be displayed after clicking on the select input')
     ).toHaveText('val1val2val3val4');
   });
@@ -69,12 +70,12 @@ test.describe('edit panel plugin settings', () => {
   }) => {
     await panelEditPage.setVisualization(TABLE_VIZ_NAME);
     await expect(
-      panelEditPage.getByTestIdOrAriaLabel(selectors.components.PanelEditor.toggleVizPicker),
+      panelEditPage.getByGrafanaSelector(selectors.components.PanelEditor.toggleVizPicker),
       formatExpectError('Expected panel visualization to be set to table')
     ).toHaveText(TABLE_VIZ_NAME);
     await panelEditPage.setPanelTitle(PANEL_TITLE);
     await expect(
-      panelEditPage.getByTestIdOrAriaLabel(selectors.components.Panels.Panel.title(PANEL_TITLE)),
+      panelEditPage.getByGrafanaSelector(selectors.components.Panels.Panel.title(PANEL_TITLE)),
       formatExpectError('Expected panel title to be updated')
     ).toBeVisible();
     await panelEditPage.collapseSection(STANDARD_OTIONS_CATEGORY);
@@ -83,4 +84,10 @@ test.describe('edit panel plugin settings', () => {
       formatExpectError('Expected section to be collapsed')
     ).toBeVisible();
   });
+});
+
+test('backToDashboard method should navigate to dashboard page', async ({ gotoPanelEditPage, page }) => {
+  const panelEditPage = await gotoPanelEditPage({ dashboard: REACT_TABLE_DASHBOARD, id: '4' });
+  await panelEditPage.backToDashboard();
+  await expect(page.url()).not.toContain('editPanel');
 });

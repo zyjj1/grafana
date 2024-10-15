@@ -28,16 +28,12 @@ type LocalSigner struct {
 }
 
 func (s *LocalSigner) SignIDToken(ctx context.Context, claims *auth.IDClaims) (string, error) {
-	if !s.features.IsEnabled(ctx, featuremgmt.FlagIdForwarding) {
-		return "", nil
-	}
-
 	signer, err := s.getSigner(ctx)
 	if err != nil {
 		return "", err
 	}
 
-	builder := jwt.Signed(signer).Claims(claims)
+	builder := jwt.Signed(signer).Claims(&claims.Rest).Claims(claims.Claims)
 
 	token, err := builder.CompactSerialize()
 	if err != nil {
@@ -54,7 +50,10 @@ func (s *LocalSigner) getSigner(ctx context.Context) (jose.Signer, error) {
 	}
 
 	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.ES256, Key: key}, &jose.SignerOptions{
-		ExtraHeaders: map[jose.HeaderKey]any{headerKeyID: id},
+		ExtraHeaders: map[jose.HeaderKey]any{
+			headerKeyID:     id,
+			jose.HeaderType: "jwt",
+		},
 	})
 
 	if err != nil {

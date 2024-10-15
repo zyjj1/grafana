@@ -1,3 +1,4 @@
+import { VariableRefresh } from '@grafana/data';
 import {
   DeepPartial,
   EmbeddedScene,
@@ -15,16 +16,16 @@ import { ALL_VARIABLE_TEXT, ALL_VARIABLE_VALUE } from 'app/features/variables/co
 import { DashboardDTO } from 'app/types';
 
 import { DashboardGridItem, RepeatDirection } from '../scene/DashboardGridItem';
-import { LibraryVizPanel } from '../scene/LibraryVizPanel';
 import { VizPanelLinks, VizPanelLinksMenu } from '../scene/PanelLinks';
 import { RowRepeaterBehavior } from '../scene/RowRepeaterBehavior';
+import { DefaultGridLayoutManager } from '../scene/layout-default/DefaultGridLayoutManager';
 
 export function setupLoadDashboardMock(rsp: DeepPartial<DashboardDTO>, spy?: jest.Mock) {
   const loadDashboardMock = (spy || jest.fn()).mockResolvedValue(rsp);
+  // disabling type checks since this is a test util
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
   setDashboardLoaderSrv({
     loadDashboard: loadDashboardMock,
-    // disabling type checks since this is a test util
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
   } as unknown as DashboardLoaderSrv);
   return loadDashboardMock;
 }
@@ -35,6 +36,8 @@ export function mockResizeObserver() {
       setTimeout(() => {
         callback(
           [
+            // disabling type checks since this is a test util
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
             {
               contentRect: {
                 x: 1,
@@ -46,8 +49,6 @@ export function mockResizeObserver() {
                 left: 100,
                 right: 0,
               },
-              // disabling type checks since this is a test util
-              // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
             } as ResizeObserverEntry,
           ],
           this
@@ -67,6 +68,11 @@ export function mockResizeObserver() {
  */
 export function activateFullSceneTree(scene: SceneObject): SceneDeactivationHandler {
   const deactivationHandlers: SceneDeactivationHandler[] = [];
+
+  // Important that variables are activated before other children
+  if (scene.state.$variables) {
+    deactivationHandlers.push(activateFullSceneTree(scene.state.$variables));
+  }
 
   scene.forEachChild((child) => {
     // For query runners which by default use the container width for maxDataPoints calculation we are setting a width.
@@ -97,9 +103,11 @@ interface SceneOptions {
   numberOfOptions?: number;
   usePanelRepeater?: boolean;
   useRowRepeater?: boolean;
+  throwError?: string;
+  variableRefresh?: VariableRefresh;
 }
 
-export function buildPanelRepeaterScene(options: SceneOptions, source?: VizPanel | LibraryVizPanel) {
+export function buildPanelRepeaterScene(options: SceneOptions, source?: VizPanel) {
   const defaults = { usePanelRepeater: true, ...options };
 
   const withRepeat = new DashboardGridItem({
@@ -130,18 +138,9 @@ export function buildPanelRepeaterScene(options: SceneOptions, source?: VizPanel
     }),
   });
 
-  const rowChildren = defaults.usePanelRepeater ? withRepeat : withoutRepeat;
-
   const row = new SceneGridRow({
-    $behaviors: defaults.useRowRepeater
-      ? [
-          new RowRepeaterBehavior({
-            variableName: 'handler',
-            sources: [rowChildren],
-          }),
-        ]
-      : [],
-    children: defaults.useRowRepeater ? [] : [rowChildren],
+    $behaviors: defaults.useRowRepeater ? [new RowRepeaterBehavior({ variableName: 'handler' })] : [],
+    children: [defaults.usePanelRepeater ? withRepeat : withoutRepeat],
   });
 
   const panelRepeatVariable = new TestVariable({
@@ -159,6 +158,8 @@ export function buildPanelRepeaterScene(options: SceneOptions, source?: VizPanel
       { label: 'D', value: '4' },
       { label: 'E', value: '5' },
     ].slice(0, options.numberOfOptions),
+    throwError: defaults.throwError,
+    refresh: options.variableRefresh,
   });
 
   const rowRepeatVariable = new TestVariable({
@@ -176,6 +177,7 @@ export function buildPanelRepeaterScene(options: SceneOptions, source?: VizPanel
       { label: 'DD', value: '44' },
       { label: 'EE', value: '55' },
     ].slice(0, options.numberOfOptions),
+    throwError: defaults.throwError,
   });
 
   const scene = new EmbeddedScene({
@@ -183,8 +185,10 @@ export function buildPanelRepeaterScene(options: SceneOptions, source?: VizPanel
     $variables: new SceneVariableSet({
       variables: [panelRepeatVariable, rowRepeatVariable],
     }),
-    body: new SceneGridLayout({
-      children: [row],
+    body: new DefaultGridLayoutManager({
+      grid: new SceneGridLayout({
+        children: [row],
+      }),
     }),
   });
 

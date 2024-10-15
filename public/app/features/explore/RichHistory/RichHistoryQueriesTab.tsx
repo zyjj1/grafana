@@ -1,12 +1,12 @@
 import { css } from '@emotion/css';
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
+import { useAsync } from 'react-use';
 
-import { GrafanaTheme2, SelectableValue } from '@grafana/data';
-import { config } from '@grafana/runtime';
+import { DataSourceApi, GrafanaTheme2, SelectableValue } from '@grafana/data';
+import { config, getDataSourceSrv } from '@grafana/runtime';
 import { Button, FilterInput, MultiSelect, RangeSlider, Select, useStyles2 } from '@grafana/ui';
 import { Trans, t } from 'app/core/internationalization';
 import {
-  createDatasourcesList,
   mapNumbertoTimeInSlider,
   mapQueriesToHeadings,
   SortOrder,
@@ -22,13 +22,13 @@ export interface RichHistoryQueriesTabProps {
   queries: RichHistoryQuery[];
   totalQueries: number;
   loading: boolean;
-  activeDatasourceInstance: string;
   updateFilters: (filtersToUpdate?: Partial<RichHistorySearchFilters>) => void;
   clearRichHistoryResults: () => void;
   loadMoreRichHistory: () => void;
   richHistorySettings: RichHistorySettings;
   richHistorySearchFilters?: RichHistorySearchFilters;
-  exploreId: string;
+  activeDatasources: string[];
+  listOfDatasources: Array<{ name: string; uid: string }>;
   height: number;
 }
 
@@ -122,20 +122,19 @@ export function RichHistoryQueriesTab(props: RichHistoryQueriesTabProps) {
     clearRichHistoryResults,
     loadMoreRichHistory,
     richHistorySettings,
-    exploreId,
     height,
-    activeDatasourceInstance,
+    listOfDatasources,
+    activeDatasources,
   } = props;
 
   const styles = useStyles2(getStyles, height);
 
-  const listOfDatasources = createDatasourcesList();
-
+  // on mount, set filter to either active datasource or all datasources
   useEffect(() => {
     const datasourceFilters =
-      !richHistorySettings.activeDatasourceOnly && richHistorySettings.lastUsedDatasourceFilters
+      !richHistorySettings.activeDatasourcesOnly && richHistorySettings.lastUsedDatasourceFilters
         ? richHistorySettings.lastUsedDatasourceFilters
-        : [activeDatasourceInstance];
+        : activeDatasources;
     const filters: RichHistorySearchFilters = {
       search: '',
       sortOrder: SortOrder.Descending,
@@ -152,10 +151,29 @@ export function RichHistoryQueriesTab(props: RichHistoryQueriesTabProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const { value: datasourceFilterApis, loading: loadingDs } = useAsync(async () => {
+    const datasourcesToGet = listOfDatasources.map((ds) => ds.uid);
+    const dsGetProm = datasourcesToGet.map(async (dsf) => {
+      try {
+        // this get works off datasource names
+        return getDataSourceSrv().get(dsf);
+      } catch (e) {
+        return Promise.resolve();
+      }
+    });
+
+    if (dsGetProm !== undefined) {
+      const enhancedDatasourceData = (await Promise.all(dsGetProm)).filter((dsi): dsi is DataSourceApi => !!dsi);
+      return enhancedDatasourceData;
+    } else {
+      return [];
+    }
+  }, [richHistorySearchFilters?.datasourceFilters]);
+
   if (!richHistorySearchFilters) {
     return (
       <span>
-        <Trans i18nKey="explore.rich-history-queries-tab.loading">Loading...</Trans>;
+        <Trans i18nKey="explore.rich-history-queries-tab.loading">Loading...</Trans>
       </span>
     );
   }
@@ -199,7 +217,7 @@ export function RichHistoryQueriesTab(props: RichHistoryQueriesTabProps) {
 
       <div className={styles.containerContent} data-testid="query-history-queries-tab">
         <div className={styles.selectors}>
-          {!richHistorySettings.activeDatasourceOnly && (
+          {!richHistorySettings.activeDatasourcesOnly && (
             <MultiSelect
               className={styles.multiselect}
               options={listOfDatasources.map((ds) => {
@@ -237,13 +255,13 @@ export function RichHistoryQueriesTab(props: RichHistoryQueriesTabProps) {
           </div>
         </div>
 
-        {loading && (
+        {(loading || loadingDs) && (
           <span>
             <Trans i18nKey="explore.rich-history-queries-tab.loading-results">Loading results...</Trans>
           </span>
         )}
 
-        {!loading &&
+        {!(loading || loadingDs) &&
           Object.keys(mappedQueriesToHeadings).map((heading) => {
             return (
               <div key={heading}>
@@ -266,7 +284,7 @@ export function RichHistoryQueriesTab(props: RichHistoryQueriesTabProps) {
                   </span>
                 </div>
                 {mappedQueriesToHeadings[heading].map((q) => {
-                  return <RichHistoryCard queryHistoryItem={q} key={q.id} exploreId={exploreId} />;
+                  return <RichHistoryCard datasourceInstances={datasourceFilterApis} queryHistoryItem={q} key={q.id} />;
                 })}
               </div>
             );

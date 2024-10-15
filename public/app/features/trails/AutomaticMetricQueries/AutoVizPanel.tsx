@@ -1,9 +1,7 @@
-import React from 'react';
-
 import { SceneObjectState, SceneObjectBase, SceneComponentProps, VizPanel, SceneQueryRunner } from '@grafana/scenes';
 import { RadioButtonGroup } from '@grafana/ui';
 
-import { trailDS } from '../shared';
+import { MDP_METRIC_OVERVIEW, trailDS } from '../shared';
 import { getMetricSceneFor } from '../utils';
 
 import { AutoQueryDef } from './types';
@@ -20,10 +18,11 @@ export class AutoVizPanel extends SceneObjectBase<AutoVizPanelState> {
   }
 
   public onActivate() {
-    const { autoQuery } = getMetricSceneFor(this).state;
-    this.setState({
-      panel: this.getVizPanelFor(autoQuery.main),
-    });
+    if (!this.state.panel) {
+      const { autoQuery } = getMetricSceneFor(this).state;
+
+      this.setState({ panel: this.getVizPanelFor(autoQuery.main) });
+    }
   }
 
   private getQuerySelector(def: AutoQueryDef) {
@@ -43,9 +42,7 @@ export class AutoVizPanel extends SceneObjectBase<AutoVizPanelState> {
 
     const def = metricScene.state.autoQuery.variants.find((q) => q.variant === variant)!;
 
-    this.setState({
-      panel: this.getVizPanelFor(def),
-    });
+    this.setState({ panel: this.getVizPanelFor(def) });
     metricScene.setState({ queryDef: def });
   };
 
@@ -55,7 +52,7 @@ export class AutoVizPanel extends SceneObjectBase<AutoVizPanelState> {
       .setData(
         new SceneQueryRunner({
           datasource: trailDS,
-          maxDataPoints: 500,
+          maxDataPoints: MDP_METRIC_OVERVIEW,
           queries: def.queries,
         })
       )

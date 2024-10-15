@@ -1,6 +1,7 @@
 import { css } from '@emotion/css';
 import pluralize from 'pluralize';
-import React, { PureComponent } from 'react';
+import { PureComponent } from 'react';
+import * as React from 'react';
 import { DropEvent, FileRejection } from 'react-dropzone';
 
 import {
@@ -8,12 +9,12 @@ import {
   SelectableValue,
   rangeUtil,
   DataQueryRequest,
-  DataFrame,
   DataFrameJSON,
   dataFrameToJSON,
   GrafanaTheme2,
   getValueFormat,
   formattedValueToString,
+  Field,
 } from '@grafana/data';
 import { config, getDataSourceSrv, reportInteraction } from '@grafana/runtime';
 import {
@@ -81,6 +82,13 @@ export class UnthemedQueryEditor extends PureComponent<Props, State> {
         description: 'Search for grafana resources',
       });
     }
+    if (config.featureToggles.unifiedStorageSearch) {
+      this.queryTypes.push({
+        label: 'Search (experimental)',
+        value: GrafanaQueryType.SearchNext,
+        description: 'Search for grafana resources',
+      });
+    }
     if (config.featureToggles.editPanelCSVDragAndDrop) {
       this.queryTypes.push({
         label: 'Spreadsheet or snapshot',
@@ -108,7 +116,7 @@ export class UnthemedQueryEditor extends PureComponent<Props, State> {
         gds.query(query).subscribe({
           next: (rsp) => {
             if (rsp.data.length) {
-              const names = (rsp.data[0] as DataFrame).fields[0];
+              const names: Field = rsp.data[0].fields[0];
               const folders = names.values.map((v) => ({
                 value: v,
                 label: v,
@@ -216,7 +224,7 @@ export class UnthemedQueryEditor extends PureComponent<Props, State> {
     }
 
     const distinctFields = new Set<string>();
-    const fields: Array<SelectableValue<string>> = channel ? channelFields[channel] ?? [] : [];
+    const fields: Array<SelectableValue<string>> = channel ? (channelFields[channel] ?? []) : [];
     // if (data && data.series?.length) {
     //   for (const frame of data.series) {
     //     for (const field of frame.fields) {
@@ -431,6 +439,16 @@ export class UnthemedQueryEditor extends PureComponent<Props, State> {
     onRunQuery();
   };
 
+  onSearchNextChange = (search: SearchQuery) => {
+    const { query, onChange, onRunQuery } = this.props;
+
+    onChange({
+      ...query,
+      searchNext: search,
+    });
+    onRunQuery();
+  };
+
   render() {
     const query = {
       ...defaultQuery,
@@ -473,6 +491,9 @@ export class UnthemedQueryEditor extends PureComponent<Props, State> {
         {queryType === GrafanaQueryType.Snapshot && this.renderSnapshotQuery()}
         {queryType === GrafanaQueryType.Search && (
           <SearchEditor value={query.search ?? {}} onChange={this.onSearchChange} />
+        )}
+        {queryType === GrafanaQueryType.SearchNext && (
+          <SearchEditor value={query.searchNext ?? {}} onChange={this.onSearchNextChange} />
         )}
       </>
     );

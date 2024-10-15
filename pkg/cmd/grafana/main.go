@@ -8,8 +8,9 @@ import (
 	"github.com/urfave/cli/v2"
 
 	gcli "github.com/grafana/grafana/pkg/cmd/grafana-cli/commands"
-	gsrv "github.com/grafana/grafana/pkg/cmd/grafana-server/commands"
-	"github.com/grafana/grafana/pkg/cmd/grafana/apiserver"
+	"github.com/grafana/grafana/pkg/cmd/grafana-server/commands"
+	"github.com/grafana/grafana/pkg/server"
+	"github.com/grafana/grafana/pkg/services/apiserver/standalone"
 )
 
 // The following variables cannot be constants, since they can be overridden through the -X link flag
@@ -20,6 +21,17 @@ var buildBranch = "main"
 var buildstamp string
 
 func main() {
+	app := MainApp()
+
+	if err := app.Run(os.Args); err != nil {
+		fmt.Printf("%s: %s %s\n", color.RedString("Error"), color.RedString("✗"), err)
+		os.Exit(1)
+	}
+
+	os.Exit(0)
+}
+
+func MainApp() *cli.App {
 	app := &cli.App{
 		Name:  "grafana",
 		Usage: "Grafana server and command line interface",
@@ -32,38 +44,32 @@ func main() {
 		Version: version,
 		Commands: []*cli.Command{
 			gcli.CLICommand(version),
-			gsrv.ServerCommand(version, commit, enterpriseCommit, buildBranch, buildstamp),
-			{
-				// The kubernetes standalone apiserver service runner
-				Name:  "apiserver",
-				Usage: "run a standalone api service (experimental)",
-				// Skip parsing flags because the command line is actually managed by cobra
-				SkipFlagParsing: true,
-				Action: func(context *cli.Context) error {
-					// exit here because apiserver handles its own error output
-					os.Exit(apiserver.RunCLI(gsrv.ServerOptions{
-						Version:          version,
-						Commit:           commit,
-						EnterpriseCommit: enterpriseCommit,
-						BuildBranch:      buildBranch,
-						BuildStamp:       buildstamp,
-						Context:          context,
-					}))
-					return nil
-				},
-			},
-			gsrv.ServerCommand(version, commit, enterpriseCommit, buildBranch, buildstamp),
+			commands.ServerCommand(version, commit, enterpriseCommit, buildBranch, buildstamp),
 		},
 		CommandNotFound:      cmdNotFound,
 		EnableBashCompletion: true,
 	}
 
-	if err := app.Run(os.Args); err != nil {
-		fmt.Printf("%s: %s %s\n", color.RedString("Error"), color.RedString("✗"), err)
-		os.Exit(1)
+	// Set the global build info
+	buildInfo := standalone.BuildInfo{
+		Version:          version,
+		Commit:           commit,
+		EnterpriseCommit: enterpriseCommit,
+		BuildBranch:      buildBranch,
+		BuildStamp:       buildstamp,
+	}
+	commands.SetBuildInfo(buildInfo)
+
+	// Add the enterprise command line to build an api server
+	f, err := server.InitializeAPIServerFactory()
+	if err == nil {
+		cmd := f.GetCLICommand(buildInfo)
+		if cmd != nil {
+			app.Commands = append(app.Commands, cmd)
+		}
 	}
 
-	os.Exit(0)
+	return app
 }
 
 func cmdNotFound(c *cli.Context, command string) {

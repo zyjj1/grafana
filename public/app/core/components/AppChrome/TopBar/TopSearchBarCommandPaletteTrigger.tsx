@@ -1,9 +1,10 @@
 import { css } from '@emotion/css';
 import { useKBar, VisualState } from 'kbar';
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { GrafanaTheme2 } from '@grafana/data';
-import { getInputStyles, Icon, ToolbarButton, useStyles2, useTheme2 } from '@grafana/ui';
+import { config } from '@grafana/runtime';
+import { getInputStyles, Icon, Text, ToolbarButton, useStyles2, useTheme2 } from '@grafana/ui';
 import { focusCss } from '@grafana/ui/src/themes/mixins';
 import { useMediaQueryChange } from 'app/core/hooks/useMediaQueryChange';
 import { t } from 'app/core/internationalization';
@@ -11,12 +12,13 @@ import { getModKey } from 'app/core/utils/browser';
 
 export function TopSearchBarCommandPaletteTrigger() {
   const theme = useTheme2();
+  const isSingleTopNav = config.featureToggles.singleTopNav;
   const { query: kbar } = useKBar((kbarState) => ({
     kbarSearchQuery: kbarState.searchQuery,
     kbarIsOpen: kbarState.visualState === VisualState.showing,
   }));
 
-  const breakpoint = theme.breakpoints.values.sm;
+  const breakpoint = isSingleTopNav ? theme.breakpoints.values.lg : theme.breakpoints.values.sm;
 
   const [isSmallScreen, setIsSmallScreen] = useState(!window.matchMedia(`(min-width: ${breakpoint}px)`).matches);
 
@@ -70,7 +72,7 @@ function PretendTextInput({ onClick }: PretendTextInputProps) {
 
         <div className={styles.suffix}>
           <Icon name="keyboard" />
-          <span className={styles.shortcut}>{modKey}+k</span>
+          <Text variant="bodySmall">{modKey}+k</Text>
         </div>
       </div>
     </div>
@@ -91,9 +93,6 @@ const getStyles = (theme: GrafanaTheme2) => {
         gap: theme.spacing(0.5),
       },
     ]),
-    shortcut: css({
-      fontSize: theme.typography.bodySmall.fontSize,
-    }),
     fakeInput: css([
       baseStyles.input,
       {

@@ -1,8 +1,13 @@
-import { DataSourceApi } from '@grafana/data';
-import { PromMetricsMetadata, PromMetricsMetadataItem } from '@grafana/prometheus';
+import {
+  DataSourceApi,
+  DataSourceGetTagKeysOptions,
+  DataSourceGetTagValuesOptions,
+  MetricFindValue,
+} from '@grafana/data';
+import { PrometheusDatasource, PromMetricsMetadata, PromMetricsMetadataItem, PromQuery } from '@grafana/prometheus';
+import PromQlLanguageProvider from '@grafana/prometheus/src/language_provider';
 import { getDataSourceSrv } from '@grafana/runtime';
 
-import PrometheusLanguageProvider from '../../../plugins/datasource/prometheus/language_provider';
 import { DataTrail } from '../DataTrail';
 import { VAR_DATASOURCE_EXPR } from '../shared';
 
@@ -34,9 +39,9 @@ export class MetricDatasourceHelper {
   private async _getMetricsMetadata() {
     const ds = await this.getDatasource();
 
-    if (ds.languageProvider instanceof PrometheusLanguageProvider) {
+    if (ds.languageProvider instanceof PromQlLanguageProvider) {
       if (!ds.languageProvider.metricsMetadata) {
-        await ds.languageProvider.start();
+        await ds.languageProvider.loadMetricsMetadata();
       }
 
       return ds.languageProvider.metricsMetadata!;
@@ -54,6 +59,44 @@ export class MetricDatasourceHelper {
 
     const metadata = await this._metricsMetadata;
     return metadata?.[metric];
+  }
+
+  /**
+   * Used for filtering label names for OTel resources to add custom match filters
+   * - target_info metric
+   * - deployment_environment label
+   * - all other OTel filters
+   * @param options
+   * @returns
+   */
+  public async getTagKeys(options: DataSourceGetTagKeysOptions<PromQuery>): Promise<MetricFindValue[]> {
+    const ds = await this.getDatasource();
+
+    if (ds instanceof PrometheusDatasource) {
+      const keys = await ds.getTagKeys(options);
+      return keys;
+    }
+
+    return [];
+  }
+
+  /**
+   * Used for filtering label values for OTel resources to add custom match filters
+   * - target_info metric
+   * - deployment_environment label
+   * - all other OTel filters
+   * @param options
+   * @returns
+   */
+  public async getTagValues(options: DataSourceGetTagValuesOptions<PromQuery>) {
+    const ds = await this.getDatasource();
+
+    if (ds instanceof PrometheusDatasource) {
+      const keys = await ds.getTagValues(options);
+      return keys;
+    }
+
+    return [];
   }
 }
 

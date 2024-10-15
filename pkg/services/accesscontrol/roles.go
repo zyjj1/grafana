@@ -33,6 +33,10 @@ const (
 	FixedCloudViewerRole = "fixed:cloud:viewer"
 	FixedCloudEditorRole = "fixed:cloud:editor"
 	FixedCloudAdminRole  = "fixed:cloud:admin"
+
+	FixedCloudSupportTicketReader = "fixed:cloud:supportticket:reader"
+	FixedCloudSupportTicketEditor = "fixed:cloud:supportticket:editor"
+	FixedCloudSupportTicketAdmin  = "fixed:cloud:supportticket:admin"
 )
 
 // Roles definition
@@ -261,6 +265,14 @@ var (
 				Action: ActionSettingsWrite,
 				Scope:  ScopeSettingsOAuth("generic_oauth"),
 			},
+			{
+				Action: ActionSettingsRead,
+				Scope:  ScopeSettingsOAuth("ldap"),
+			},
+			{
+				Action: ActionSettingsWrite,
+				Scope:  ScopeSettingsOAuth("ldap"),
+			},
 		},
 	}
 
@@ -388,7 +400,7 @@ func ValidateBuiltInRoles(builtInRoles []string) error {
 			return ErrNoneRoleAssignment
 		}
 		if !org.RoleType(br).IsValid() && br != RoleGrafanaAdmin {
-			return fmt.Errorf("'%s' %w", br, ErrInvalidBuiltinRole)
+			return ErrInvalidBuiltinRole.Build(ErrInvalidBuiltinRoleData(br))
 		}
 	}
 	return nil

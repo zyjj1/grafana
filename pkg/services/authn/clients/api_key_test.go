@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/grafana/authlib/claims"
+	"github.com/grafana/grafana/pkg/apimachinery/identity"
 	"github.com/grafana/grafana/pkg/components/apikeygen"
 	"github.com/grafana/grafana/pkg/components/satokengen"
 	"github.com/grafana/grafana/pkg/services/apikey"
@@ -47,7 +49,8 @@ func TestAPIKey_Authenticate(t *testing.T) {
 				Role:  org.RoleAdmin,
 			},
 			expectedIdentity: &authn.Identity{
-				ID:       "api-key:1",
+				ID:       "1",
+				Type:     claims.TypeAPIKey,
 				OrgID:    1,
 				OrgRoles: map[int64]org.RoleType{1: org.RoleAdmin},
 				ClientParams: authn.ClientParams{
@@ -70,7 +73,8 @@ func TestAPIKey_Authenticate(t *testing.T) {
 				ServiceAccountId: intPtr(1),
 			},
 			expectedIdentity: &authn.Identity{
-				ID:    "service-account:1",
+				ID:    "1",
+				Type:  claims.TypeServiceAccount,
 				OrgID: 1,
 				ClientParams: authn.ClientParams{
 					FetchSyncedUser: true,
@@ -185,100 +189,105 @@ func TestAPIKey_Test(t *testing.T) {
 	}
 }
 
-func TestAPIKey_GetAPIKeyIDFromIdentity(t *testing.T) {
-	type TestCase struct {
-		desc             string
-		expectedKey      *apikey.APIKey
-		expectedIdentity *authn.Identity
-		expectedError    error
-		expectedKeyID    int64
-		expectedExists   bool
+func TestAPIKey_ResolveIdentity(t *testing.T) {
+	type testCase struct {
+		desc string
+		typ  claims.IdentityType
+		id   string
+
+		exptedApiKey *apikey.APIKey
+
+		expectedIdenity *authn.Identity
+		expectedErr     error
 	}
 
-	tests := []TestCase{
+	tests := []testCase{
 		{
-			desc: "should return API Key ID for valid token that is connected to service account",
-			expectedKey: &apikey.APIKey{
+			desc:        "should return error for invalid type",
+			id:          "1",
+			typ:         claims.TypeUser,
+			expectedErr: identity.ErrInvalidTypedID,
+		},
+		{
+			desc: "should return error when api key has expired",
+			id:   "1",
+			typ:  claims.TypeAPIKey,
+			exptedApiKey: &apikey.APIKey{
+				ID:      1,
+				OrgID:   1,
+				Expires: intPtr(0),
+			},
+			expectedErr: errAPIKeyExpired,
+		},
+		{
+			desc: "should return error when api key is revoked",
+			id:   "1",
+			typ:  claims.TypeAPIKey,
+			exptedApiKey: &apikey.APIKey{
+				ID:        1,
+				OrgID:     1,
+				IsRevoked: boolPtr(true),
+			},
+			expectedErr: errAPIKeyRevoked,
+		},
+		{
+			desc: "should return error when api key is connected to service account",
+			id:   "1",
+			typ:  claims.TypeAPIKey,
+
+			exptedApiKey: &apikey.APIKey{
 				ID:               1,
 				OrgID:            1,
-				Key:              hash,
 				ServiceAccountId: intPtr(1),
 			},
-			expectedIdentity: &authn.Identity{
-				ID:              "service-account:1",
-				OrgID:           1,
-				Name:            "test",
-				AuthenticatedBy: login.APIKeyAuthModule,
-			},
-			expectedKeyID:  1,
-			expectedExists: true,
+			expectedErr: identity.ErrInvalidTypedID,
 		},
 		{
-			desc: "should return API Key ID for valid token for API key",
-			expectedKey: &apikey.APIKey{
-				ID:    2,
-				OrgID: 1,
-				Key:   hash,
+			desc: "should return error when api key is belongs to different org",
+			id:   "1",
+			typ:  claims.TypeAPIKey,
+			exptedApiKey: &apikey.APIKey{
+				ID:               1,
+				OrgID:            2,
+				ServiceAccountId: intPtr(1),
 			},
-			expectedIdentity: &authn.Identity{
-				ID:              "api-key:2",
-				OrgID:           1,
-				Name:            "test",
-				AuthenticatedBy: login.APIKeyAuthModule,
-			},
-			expectedKeyID:  2,
-			expectedExists: true,
+			expectedErr: errAPIKeyOrgMismatch,
 		},
 		{
-			desc: "should not return any ID when the request is not made by API key or service account",
-			expectedKey: &apikey.APIKey{
-				ID:    2,
-				OrgID: 1,
-				Key:   hash,
-			},
-			expectedIdentity: &authn.Identity{
-				ID:              "user:2",
-				OrgID:           1,
-				Name:            "test",
-				AuthenticatedBy: login.APIKeyAuthModule,
-			},
-			expectedKeyID:  -1,
-			expectedExists: false,
-		},
-		{
-			desc: "should not return any ID when the can't fetch API Key",
-			expectedKey: &apikey.APIKey{
+			desc: "should return valid idenitty",
+			id:   "1",
+			typ:  claims.TypeAPIKey,
+			exptedApiKey: &apikey.APIKey{
 				ID:    1,
 				OrgID: 1,
-				Key:   hash,
+				Role:  org.RoleEditor,
 			},
-			expectedIdentity: &authn.Identity{
-				ID:              "service-account:2",
+			expectedIdenity: &authn.Identity{
 				OrgID:           1,
-				Name:            "test",
+				OrgRoles:        map[int64]org.RoleType{1: org.RoleEditor},
+				ID:              "1",
+				Type:            claims.TypeAPIKey,
 				AuthenticatedBy: login.APIKeyAuthModule,
+				ClientParams:    authn.ClientParams{SyncPermissions: true},
 			},
-			expectedError:  fmt.Errorf("invalid token"),
-			expectedKeyID:  -1,
-			expectedExists: false,
 		},
 	}
-
-	req := &authn.Request{HTTPRequest: &http.Request{
-		Header: map[string][]string{
-			"Authorization": {"Bearer " + secret},
-		},
-	}}
 
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
 			c := ProvideAPIKey(&apikeytest.Service{
-				ExpectedError:  tt.expectedError,
-				ExpectedAPIKey: tt.expectedKey,
+				ExpectedAPIKey: tt.exptedApiKey,
 			})
-			id, exists := c.getAPIKeyID(context.Background(), tt.expectedIdentity, req)
-			assert.Equal(t, tt.expectedExists, exists)
-			assert.Equal(t, tt.expectedKeyID, id)
+
+			identity, err := c.ResolveIdentity(context.Background(), 1, tt.typ, tt.id)
+			if tt.expectedErr != nil {
+				assert.Nil(t, identity)
+				assert.ErrorIs(t, err, tt.expectedErr)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.EqualValues(t, *tt.expectedIdenity, *identity)
 		})
 	}
 }

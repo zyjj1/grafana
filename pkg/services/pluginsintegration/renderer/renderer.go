@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/infra/tracing"
 	"github.com/grafana/grafana/pkg/plugins"
 	"github.com/grafana/grafana/pkg/plugins/backendplugin/pluginextensionv2"
 	"github.com/grafana/grafana/pkg/plugins/backendplugin/provider"
@@ -20,12 +21,14 @@ import (
 	"github.com/grafana/grafana/pkg/plugins/manager/signature"
 	"github.com/grafana/grafana/pkg/plugins/manager/sources"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/pipeline"
+	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginerrs"
 	"github.com/grafana/grafana/pkg/services/rendering"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func ProvideService(cfg *config.PluginManagementCfg, pluginEnvProvider envvars.Provider,
-	registry registry.Service) (*Manager, error) {
-	l, err := createLoader(cfg, pluginEnvProvider, registry)
+	registry registry.Service, tracer tracing.Tracer) (*Manager, error) {
+	l, err := createLoader(cfg, pluginEnvProvider, registry, tracer)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +107,7 @@ func (m *Manager) Renderer(ctx context.Context) (rendering.Plugin, bool) {
 }
 
 func createLoader(cfg *config.PluginManagementCfg, pluginEnvProvider envvars.Provider,
-	pr registry.Service) (loader.Service, error) {
+	pr registry.Service, tracer trace.Tracer) (loader.Service, error) {
 	d := discovery.New(cfg, discovery.Opts{
 		FindFilterFuncs: []discovery.FindFilterFunc{
 			discovery.NewPermittedPluginTypesFilterStep([]plugins.Type{plugins.TypeRenderer}),
@@ -123,7 +126,7 @@ func createLoader(cfg *config.PluginManagementCfg, pluginEnvProvider envvars.Pro
 	})
 	i := initialization.New(cfg, initialization.Opts{
 		InitializeFuncs: []initialization.InitializeFunc{
-			initialization.BackendClientInitStep(pluginEnvProvider, provider.New(provider.RendererProvider)),
+			initialization.BackendClientInitStep(pluginEnvProvider, provider.New(provider.RendererProvider), tracer),
 			initialization.PluginRegistrationStep(pr),
 		},
 	})
@@ -136,5 +139,7 @@ func createLoader(cfg *config.PluginManagementCfg, pluginEnvProvider envvars.Pro
 		return nil, err
 	}
 
-	return loader.New(d, b, v, i, t), nil
+	et := pluginerrs.ProvideErrorTracker()
+
+	return loader.New(d, b, v, i, t, et), nil
 }

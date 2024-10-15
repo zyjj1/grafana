@@ -1,22 +1,20 @@
 import { isNumber, isString } from 'lodash';
 
-import { AppEvents, Field, getFieldDisplayName, LinkModel, PluginState, SelectableValue } from '@grafana/data';
+import { AppEvents, getFieldDisplayName, PluginState, SelectableValue } from '@grafana/data';
+import { DataFrame, Field } from '@grafana/data/';
 import appEvents from 'app/core/app_events';
 import { hasAlphaPanels, config } from 'app/core/config';
 import {
-  defaultElementItems,
-  advancedElementItems,
-  CanvasElementItem,
-  canvasElementRegistry,
-  CanvasElementOptions,
   CanvasConnection,
+  CanvasElementItem,
+  CanvasElementOptions,
   ConnectionDirection,
-} from 'app/features/canvas';
+} from 'app/features/canvas/element';
 import { notFoundItem } from 'app/features/canvas/elements/notFound';
+import { advancedElementItems, canvasElementRegistry, defaultElementItems } from 'app/features/canvas/registry';
 import { ElementState } from 'app/features/canvas/runtime/element';
 import { FrameState } from 'app/features/canvas/runtime/frame';
 import { Scene, SelectionParams } from 'app/features/canvas/runtime/scene';
-import { DimensionContext } from 'app/features/dimensions';
 
 import { AnchorPoint, ConnectionState, LineStyle, StrokeDasharray } from './types';
 
@@ -107,167 +105,6 @@ export function onAddItem(sel: SelectableValue<string>, rootLayer: FrameState | 
   }
 }
 
-/*
- * Provided a given field add any matching data links
- * Mutates the links object in place which is then returned by the `getDataLinks` function downstream
- */
-const addDataLinkForField = (
-  field: Field<unknown>,
-  data: string | undefined,
-  linkLookup: Set<string>,
-  links: Array<LinkModel<Field>>
-): void => {
-  if (field?.getLinks) {
-    const disp = field.display ? field.display(data) : { text: `${data}`, numeric: +data! };
-    field.getLinks({ calculatedValue: disp }).forEach((link) => {
-      const key = `${link.title}/${link.href}`;
-      if (!linkLookup.has(key)) {
-        links.push(link);
-        linkLookup.add(key);
-      }
-    });
-  }
-};
-
-// TODO: This could be refactored a fair amount, ideally the element specific config code should be owned by each element and not in this shared util file
-export function getDataLinks(
-  dimensionContext: DimensionContext,
-  elementOptions: CanvasElementOptions,
-  data: string | undefined
-): LinkModel[] {
-  const panelData = dimensionContext.getPanelData();
-  const frames = panelData?.series;
-
-  const links: Array<LinkModel<Field>> = [];
-  const linkLookup = new Set<string>();
-
-  const elementConfig = elementOptions.config;
-
-  frames?.forEach((frame) => {
-    const visibleFields = frame.fields.filter((field) => !Boolean(field.config.custom?.hideFrom?.tooltip));
-
-    // Text config
-    const isTextTiedToFieldData =
-      elementConfig?.text?.field &&
-      visibleFields.some((field) => getFieldDisplayName(field, frame) === elementConfig?.text?.field);
-    const isTextColorTiedToFieldData =
-      elementConfig?.color?.field &&
-      visibleFields.some((field) => getFieldDisplayName(field, frame) === elementConfig?.color?.field);
-
-    // General element config
-    const isElementBackgroundColorTiedToFieldData =
-      elementOptions?.background?.color?.field &&
-      visibleFields.some((field) => getFieldDisplayName(field, frame) === elementOptions?.background?.color?.field);
-    const isElementBackgroundImageTiedToFieldData =
-      elementOptions?.background?.image?.field &&
-      visibleFields.some((field) => getFieldDisplayName(field, frame) === elementOptions?.background?.image?.field);
-    const isElementBorderColorTiedToFieldData =
-      elementOptions?.border?.color?.field &&
-      visibleFields.some((field) => getFieldDisplayName(field, frame) === elementOptions?.border?.color?.field);
-
-    // Icon config
-    const isIconSVGTiedToFieldData =
-      elementConfig?.path?.field &&
-      visibleFields.some((field) => getFieldDisplayName(field, frame) === elementConfig?.path?.field);
-    const isIconColorTiedToFieldData =
-      elementConfig?.fill?.field &&
-      visibleFields.some((field) => getFieldDisplayName(field, frame) === elementConfig?.fill?.field);
-
-    // Wind turbine config (maybe remove / not support this?)
-    const isWindTurbineRPMTiedToFieldData =
-      elementConfig?.rpm?.field &&
-      visibleFields.some((field) => getFieldDisplayName(field, frame) === elementConfig?.rpm?.field);
-
-    // Server config
-    const isServerBlinkRateTiedToFieldData =
-      elementConfig?.blinkRate?.field &&
-      visibleFields.some((field) => getFieldDisplayName(field, frame) === elementConfig?.blinkRate?.field);
-    const isServerStatusColorTiedToFieldData =
-      elementConfig?.statusColor?.field &&
-      visibleFields.some((field) => getFieldDisplayName(field, frame) === elementConfig?.statusColor?.field);
-    const isServerBulbColorTiedToFieldData =
-      elementConfig?.bulbColor?.field &&
-      visibleFields.some((field) => getFieldDisplayName(field, frame) === elementConfig?.bulbColor?.field);
-
-    if (isTextTiedToFieldData) {
-      const field = visibleFields.filter(
-        (field) => getFieldDisplayName(field, frame) === elementConfig?.text?.field
-      )[0];
-      addDataLinkForField(field, data, linkLookup, links);
-    }
-
-    if (isTextColorTiedToFieldData) {
-      const field = visibleFields.filter(
-        (field) => getFieldDisplayName(field, frame) === elementConfig?.color?.field
-      )[0];
-      addDataLinkForField(field, data, linkLookup, links);
-    }
-
-    if (isElementBackgroundColorTiedToFieldData) {
-      const field = visibleFields.filter(
-        (field) => getFieldDisplayName(field, frame) === elementOptions?.background?.color?.field
-      )[0];
-      addDataLinkForField(field, data, linkLookup, links);
-    }
-
-    if (isElementBackgroundImageTiedToFieldData) {
-      const field = visibleFields.filter(
-        (field) => getFieldDisplayName(field, frame) === elementOptions?.background?.image?.field
-      )[0];
-      addDataLinkForField(field, data, linkLookup, links);
-    }
-
-    if (isElementBorderColorTiedToFieldData) {
-      const field = visibleFields.filter(
-        (field) => getFieldDisplayName(field, frame) === elementOptions?.border?.color?.field
-      )[0];
-      addDataLinkForField(field, data, linkLookup, links);
-    }
-
-    if (isIconSVGTiedToFieldData) {
-      const field = visibleFields.filter(
-        (field) => getFieldDisplayName(field, frame) === elementConfig?.path?.field
-      )[0];
-      addDataLinkForField(field, data, linkLookup, links);
-    }
-
-    if (isIconColorTiedToFieldData) {
-      const field = visibleFields.filter(
-        (field) => getFieldDisplayName(field, frame) === elementConfig?.fill?.field
-      )[0];
-      addDataLinkForField(field, data, linkLookup, links);
-    }
-
-    if (isWindTurbineRPMTiedToFieldData) {
-      const field = visibleFields.filter((field) => getFieldDisplayName(field, frame) === elementConfig?.rpm?.field)[0];
-      addDataLinkForField(field, data, linkLookup, links);
-    }
-
-    if (isServerBlinkRateTiedToFieldData) {
-      const field = visibleFields.filter(
-        (field) => getFieldDisplayName(field, frame) === elementConfig?.blinkRate?.field
-      )[0];
-      addDataLinkForField(field, data, linkLookup, links);
-    }
-
-    if (isServerStatusColorTiedToFieldData) {
-      const field = visibleFields.filter(
-        (field) => getFieldDisplayName(field, frame) === elementConfig?.statusColor?.field
-      )[0];
-      addDataLinkForField(field, data, linkLookup, links);
-    }
-
-    if (isServerBulbColorTiedToFieldData) {
-      const field = visibleFields.filter(
-        (field) => getFieldDisplayName(field, frame) === elementConfig?.bulbColor?.field
-      )[0];
-      addDataLinkForField(field, data, linkLookup, links);
-    }
-  });
-
-  return links;
-}
-
 export function isConnectionSource(element: ElementState) {
   return element.options.connections && element.options.connections.length > 0;
 }
@@ -298,6 +135,8 @@ export function getConnections(sceneByName: Map<string, ElementState>) {
             target,
             info: c,
             vertices: c.vertices ?? undefined,
+            sourceOriginal: c.sourceOriginal ?? undefined,
+            targetOriginal: c.targetOriginal ?? undefined,
           });
         }
       });
@@ -318,6 +157,9 @@ export function updateConnectionsForSource(element: ElementState, scene: Scene) 
     const connections = sourceConnections.filter((con) => con.targetName !== element.getName());
     connection.source.onChange({ ...connection.source.options, connections });
   });
+
+  // Update scene connection state to clear out old connections
+  scene.connections.updateState();
 }
 
 export const calculateCoordinates = (
@@ -352,6 +194,14 @@ export const calculateCoordinates = (
   }
   x2 /= transformScale;
   y2 /= transformScale;
+
+  // TODO look into a better way to avoid division by zero
+  if (x2 - x1 === 0) {
+    x2 += 1;
+  }
+  if (y2 - y1 === 0) {
+    y2 += 1;
+  }
   return { x1, y1, x2, y2 };
 };
 
@@ -365,9 +215,11 @@ export const calculateAbsoluteCoords = (
   x2: number,
   y2: number,
   valueX: number,
-  valueY: number
+  valueY: number,
+  deltaX: number,
+  deltaY: number
 ) => {
-  return { x: valueX * (x2 - x1) + x1, y: valueY * (y2 - y1) + y1 };
+  return { x: valueX * deltaX + x1, y: valueY * deltaY + y1 };
 };
 
 // Calculate angle between two points and return angle in radians
@@ -383,8 +235,8 @@ export const calculateDistance = (x1: number, y1: number, x2: number, y2: number
 // @TODO revisit, currently returning last row index for field
 export const getRowIndex = (fieldName: string | undefined, scene: Scene) => {
   if (fieldName) {
-    const series = scene.context.getPanelData()?.series[0];
-    const field = series?.fields.find((f) => (f.name = fieldName));
+    const series = scene.data?.series[0];
+    const field = series?.fields.find((field) => field.name === fieldName);
     const data = field?.values;
     return data ? data.length - 1 : 0;
   }
@@ -442,3 +294,37 @@ export const getParent = (scene: Scene) => {
   }
   return scene.div;
 };
+
+export function getElementFields(frames: DataFrame[], opts: CanvasElementOptions) {
+  const fields = new Set<Field>();
+  const cfg = opts.config ?? {};
+
+  frames.forEach((frame) => {
+    frame.fields.forEach((field) => {
+      const name = getFieldDisplayName(field, frame, frames);
+
+      // (intentional fall-through)
+      switch (name) {
+        // General element config
+        case opts.background?.color?.field:
+        case opts.background?.image?.field:
+        case opts.border?.color?.field:
+        // Text config
+        case cfg.text?.field:
+        case cfg.color?.field:
+        // Icon config
+        case cfg.path?.field:
+        case cfg.fill?.field:
+        // Server config
+        case cfg.blinkRate?.field:
+        case cfg.statusColor?.field:
+        case cfg.bulbColor?.field:
+        // Wind turbine config (maybe remove / not support this?)
+        case cfg.rpm?.field:
+          fields.add(field);
+      }
+    });
+  });
+
+  return [...fields];
+}

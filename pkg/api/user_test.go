@@ -21,13 +21,16 @@ import (
 	"github.com/grafana/grafana/pkg/infra/db"
 	"github.com/grafana/grafana/pkg/infra/db/dbtest"
 	"github.com/grafana/grafana/pkg/infra/remotecache"
+	"github.com/grafana/grafana/pkg/infra/tracing"
 	"github.com/grafana/grafana/pkg/login/social"
 	"github.com/grafana/grafana/pkg/login/social/socialtest"
 	"github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/accesscontrol/acimpl"
 	acmock "github.com/grafana/grafana/pkg/services/accesscontrol/mock"
 	"github.com/grafana/grafana/pkg/services/auth/idtest"
+	"github.com/grafana/grafana/pkg/services/authz/zanzana"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
+	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	"github.com/grafana/grafana/pkg/services/login"
 	"github.com/grafana/grafana/pkg/services/login/authinfoimpl"
 	"github.com/grafana/grafana/pkg/services/login/authinfotest"
@@ -39,6 +42,7 @@ import (
 	"github.com/grafana/grafana/pkg/services/secrets/database"
 	"github.com/grafana/grafana/pkg/services/secrets/fakes"
 	secretsManager "github.com/grafana/grafana/pkg/services/secrets/manager"
+	"github.com/grafana/grafana/pkg/services/sqlstore"
 	"github.com/grafana/grafana/pkg/services/supportbundles/supportbundlestest"
 	tempuser "github.com/grafana/grafana/pkg/services/temp_user"
 	"github.com/grafana/grafana/pkg/services/temp_user/tempuserimpl"
@@ -53,12 +57,11 @@ const newEmail = "newemail@localhost"
 
 func TestUserAPIEndpoint_userLoggedIn(t *testing.T) {
 	settings := setting.NewCfg()
-	sqlStore := db.InitTestDB(t)
-	sqlStore.Cfg = settings
+	sqlStore := db.InitTestDB(t, sqlstore.InitTestDBOpt{Cfg: settings})
 	hs := &HTTPServer{
 		Cfg:           settings,
 		SQLStore:      sqlStore,
-		AccessControl: acimpl.ProvideAccessControl(settings),
+		AccessControl: acimpl.ProvideAccessControl(featuremgmt.WithFeatures(), zanzana.NewNoopClient()),
 	}
 
 	mockResult := user.SearchUserQueryResult{
@@ -78,9 +81,12 @@ func TestUserAPIEndpoint_userLoggedIn(t *testing.T) {
 		srv := authinfoimpl.ProvideService(
 			authInfoStore, remotecache.NewFakeCacheStorage(), secretsService)
 		hs.authInfoService = srv
-		orgSvc, err := orgimpl.ProvideService(sqlStore, sqlStore.Cfg, quotatest.New(false, nil))
+		orgSvc, err := orgimpl.ProvideService(sqlStore, settings, quotatest.New(false, nil))
 		require.NoError(t, err)
-		userSvc, err := userimpl.ProvideService(sqlStore, orgSvc, sc.cfg, nil, nil, quotatest.New(false, nil), supportbundlestest.NewFakeBundleService())
+		userSvc, err := userimpl.ProvideService(
+			sqlStore, orgSvc, sc.cfg, nil, nil, tracing.InitializeTracerForTest(),
+			quotatest.New(false, nil), supportbundlestest.NewFakeBundleService(),
+		)
 		require.NoError(t, err)
 		hs.userService = userSvc
 
@@ -148,9 +154,12 @@ func TestUserAPIEndpoint_userLoggedIn(t *testing.T) {
 			Login:   "admin",
 			IsAdmin: true,
 		}
-		orgSvc, err := orgimpl.ProvideService(sqlStore, sqlStore.Cfg, quotatest.New(false, nil))
+		orgSvc, err := orgimpl.ProvideService(sqlStore, sc.cfg, quotatest.New(false, nil))
 		require.NoError(t, err)
-		userSvc, err := userimpl.ProvideService(sqlStore, orgSvc, sc.cfg, nil, nil, quotatest.New(false, nil), supportbundlestest.NewFakeBundleService())
+		userSvc, err := userimpl.ProvideService(
+			sqlStore, orgSvc, sc.cfg, nil, nil, tracing.InitializeTracerForTest(),
+			quotatest.New(false, nil), supportbundlestest.NewFakeBundleService(),
+		)
 		require.NoError(t, err)
 		_, err = userSvc.Create(context.Background(), &createUserCmd)
 		require.Nil(t, err)
@@ -345,12 +354,14 @@ func Test_GetUserByID(t *testing.T) {
 
 func TestHTTPServer_UpdateUser(t *testing.T) {
 	settings := setting.NewCfg()
+	settings.SAMLAuthEnabled = true
 	sqlStore := db.InitTestDB(t)
 
 	hs := &HTTPServer{
 		Cfg:           settings,
 		SQLStore:      sqlStore,
 		AccessControl: acmock.New(),
+		SocialService: &socialtest.FakeSocialService{ExpectedAuthInfoProvider: &social.OAuthInfo{Enabled: true}},
 	}
 
 	updateUserCommand := user.UpdateUserCommand{
@@ -366,7 +377,8 @@ func TestHTTPServer_UpdateUser(t *testing.T) {
 		routePattern: "/api/users/:id",
 		cmd:          updateUserCommand,
 		fn: func(sc *scenarioContext) {
-			sc.authInfoService.ExpectedUserAuth = &login.UserAuth{}
+			sc.authInfoService.ExpectedUserAuth = &login.UserAuth{AuthModule: login.SAMLAuthModule}
+
 			sc.fakeReqWithParams("PUT", sc.url, map[string]string{"id": "1"}).exec()
 			assert.Equal(t, 403, sc.resp.Code)
 		},
@@ -376,13 +388,15 @@ func TestHTTPServer_UpdateUser(t *testing.T) {
 func setupUpdateEmailTests(t *testing.T, cfg *setting.Cfg) (*user.User, *HTTPServer, *notifications.NotificationServiceMock) {
 	t.Helper()
 
-	sqlStore := db.InitTestDB(t)
-	sqlStore.Cfg = cfg
+	sqlStore := db.InitTestDB(t, sqlstore.InitTestDBOpt{Cfg: cfg})
 
 	tempUserService := tempuserimpl.ProvideService(sqlStore, cfg)
 	orgSvc, err := orgimpl.ProvideService(sqlStore, cfg, quotatest.New(false, nil))
 	require.NoError(t, err)
-	userSvc, err := userimpl.ProvideService(sqlStore, orgSvc, cfg, nil, nil, quotatest.New(false, nil), supportbundlestest.NewFakeBundleService())
+	userSvc, err := userimpl.ProvideService(
+		sqlStore, orgSvc, cfg, nil, nil, tracing.InitializeTracerForTest(),
+		quotatest.New(false, nil), supportbundlestest.NewFakeBundleService(),
+	)
 	require.NoError(t, err)
 
 	// Create test user
@@ -603,13 +617,15 @@ func TestUser_UpdateEmail(t *testing.T) {
 		}
 
 		nsMock := notifications.MockNotificationService()
-		sqlStore := db.InitTestDB(t)
-		sqlStore.Cfg = settings
+		sqlStore := db.InitTestDB(t, sqlstore.InitTestDBOpt{Cfg: settings})
 
 		tempUserSvc := tempuserimpl.ProvideService(sqlStore, settings)
 		orgSvc, err := orgimpl.ProvideService(sqlStore, settings, quotatest.New(false, nil))
 		require.NoError(t, err)
-		userSvc, err := userimpl.ProvideService(sqlStore, orgSvc, settings, nil, nil, quotatest.New(false, nil), supportbundlestest.NewFakeBundleService())
+		userSvc, err := userimpl.ProvideService(
+			sqlStore, orgSvc, settings, nil, nil, tracing.InitializeTracerForTest(),
+			quotatest.New(false, nil), supportbundlestest.NewFakeBundleService(),
+		)
 		require.NoError(t, err)
 
 		server := SetupAPITestServer(t, func(hs *HTTPServer) {
@@ -1086,11 +1102,13 @@ func updateUserScenario(t *testing.T, ctx updateUserContext, hs *HTTPServer) {
 func TestHTTPServer_UpdateSignedInUser(t *testing.T) {
 	settings := setting.NewCfg()
 	sqlStore := db.InitTestDB(t)
+	settings.SAMLAuthEnabled = true
 
 	hs := &HTTPServer{
 		Cfg:           settings,
 		SQLStore:      sqlStore,
 		AccessControl: acmock.New(),
+		SocialService: &socialtest.FakeSocialService{},
 	}
 
 	updateUserCommand := user.UpdateUserCommand{
@@ -1106,7 +1124,7 @@ func TestHTTPServer_UpdateSignedInUser(t *testing.T) {
 		routePattern: "/api/users/",
 		cmd:          updateUserCommand,
 		fn: func(sc *scenarioContext) {
-			sc.authInfoService.ExpectedUserAuth = &login.UserAuth{}
+			sc.authInfoService.ExpectedUserAuth = &login.UserAuth{AuthModule: login.SAMLAuthModule}
 			sc.fakeReqWithParams("PUT", sc.url, map[string]string{"id": "1"}).exec()
 			assert.Equal(t, 403, sc.resp.Code)
 		},

@@ -1,13 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import React from 'react';
-import { Provider } from 'react-redux';
-import { Router } from 'react-router-dom';
-import { getGrafanaContextMock } from 'test/mocks/getGrafanaContextMock';
+import { screen, waitFor } from '@testing-library/react';
+import { Routes, Route } from 'react-router-dom-v5-compat';
+import { render } from 'test/test-utils';
 
 import { selectors as e2eSelectors } from '@grafana/e2e-selectors';
 import { config, locationService } from '@grafana/runtime';
-import { GrafanaContext } from 'app/core/context/GrafanaContext';
-import { configureStore } from 'app/store/configureStore';
+import { backendSrv } from 'app/core/services/backend_srv';
 
 import { DashboardRoutes } from '../../../types';
 
@@ -25,31 +22,40 @@ jest.mock('@grafana/runtime', () => ({
   }),
 }));
 
-function setup(props: Partial<PublicDashboardPageProxyProps>) {
-  const context = getGrafanaContextMock();
-  const store = configureStore({});
+jest.mock('react-router-dom-v5-compat', () => ({
+  ...jest.requireActual('react-router-dom-v5-compat'),
+  useParams: () => ({ accessToken: 'an-access-token' }),
+}));
 
+function setup(props: Partial<PublicDashboardPageProxyProps>) {
   return render(
-    <GrafanaContext.Provider value={context}>
-      <Provider store={store}>
-        <Router history={locationService.getHistory()}>
+    <Routes>
+      <Route
+        path="/public-dashboards/:accessToken"
+        element={
           <PublicDashboardPageProxy
-            location={locationService.getLocation()}
-            history={locationService.getHistory()}
             queryParams={{}}
+            location={locationService.getLocation()}
             route={{ routeName: DashboardRoutes.Public, component: () => null, path: '/:accessToken' }}
-            match={{ params: { accessToken: 'an-access-token' }, isExact: true, path: '/', url: '/' }}
             {...props}
           />
-        </Router>
-      </Provider>
-    </GrafanaContext.Provider>
+        }
+      />
+    </Routes>,
+    {
+      historyOptions: { initialEntries: [`/public-dashboards/an-access-token`] },
+    }
   );
 }
 
 describe('PublicDashboardPageProxy', () => {
   beforeEach(() => {
     config.featureToggles.publicDashboardsScene = false;
+
+    // Mock the dashboard UID response so we don't get any refused connection errors
+    // from this test (as the fetch polyfill means this logic would actually try and call the API)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    jest.spyOn(backendSrv, 'getPublicDashboardByUid').mockResolvedValue({ dashboard: {}, meta: {} } as any);
   });
 
   describe('when scene feature enabled', () => {

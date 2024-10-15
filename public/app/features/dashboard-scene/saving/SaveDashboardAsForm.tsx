@@ -1,7 +1,8 @@
 import debounce from 'debounce-promise';
-import React from 'react';
+import { ChangeEvent, useState } from 'react';
 import { UseFormSetValue, useForm } from 'react-hook-form';
 
+import { selectors } from '@grafana/e2e-selectors';
 import { Dashboard } from '@grafana/schema';
 import { Button, Input, Switch, Field, Label, TextArea, Stack, Alert, Box } from '@grafana/ui';
 import { FolderPicker } from 'app/core/components/Select/FolderPicker';
@@ -9,7 +10,6 @@ import { validationSrv } from 'app/features/manage-dashboards/services/Validatio
 
 import { DashboardScene } from '../scene/DashboardScene';
 
-import { SaveDashboardDrawer } from './SaveDashboardDrawer';
 import { DashboardChangeInfo, NameAlreadyExistsError, SaveButton, isNameExistsError } from './shared';
 import { useSaveDashboard } from './useSaveDashboard';
 
@@ -23,14 +23,13 @@ interface SaveDashboardAsFormDTO {
 
 export interface Props {
   dashboard: DashboardScene;
-  drawer: SaveDashboardDrawer;
   changeInfo: DashboardChangeInfo;
 }
 
-export function SaveDashboardAsForm({ dashboard, drawer, changeInfo }: Props) {
+export function SaveDashboardAsForm({ dashboard, changeInfo }: Props) {
   const { changedSaveModel } = changeInfo;
 
-  const { register, handleSubmit, setValue, formState, getValues, watch, trigger } = useForm<SaveDashboardAsFormDTO>({
+  const { register, handleSubmit, setValue, formState, getValues, watch } = useForm<SaveDashboardAsFormDTO>({
     mode: 'onBlur',
     defaultValues: {
       title: changeInfo.isNew ? changedSaveModel.title! : `${changedSaveModel.title} Copy`,
@@ -48,6 +47,8 @@ export function SaveDashboardAsForm({ dashboard, drawer, changeInfo }: Props) {
 
   const { state, onSaveDashboard } = useSaveDashboard(false);
 
+  const [contentSent, setContentSent] = useState<{ title?: string; folderUid?: string }>({});
+  const [hasFolderChanged, setHasFolderChanged] = useState(false);
   const onSave = async (overwrite: boolean) => {
     const data = getValues();
 
@@ -56,6 +57,11 @@ export function SaveDashboardAsForm({ dashboard, drawer, changeInfo }: Props) {
 
     if (result.status === 'success') {
       dashboard.closeModal();
+    } else {
+      setContentSent({
+        title: data.title,
+        folderUid: data.folder.uid,
+      });
     }
   };
 
@@ -65,20 +71,21 @@ export function SaveDashboardAsForm({ dashboard, drawer, changeInfo }: Props) {
     </Button>
   );
 
-  const saveButton = (overwrite: boolean) => (
-    <SaveButton isValid={isValid} isLoading={state.loading} onSave={onSave} overwrite={overwrite} />
-  );
-
+  const saveButton = (overwrite: boolean) => {
+    const showSaveButton = !isValid && hasFolderChanged ? true : isValid;
+    return <SaveButton isValid={showSaveButton} isLoading={state.loading} onSave={onSave} overwrite={overwrite} />;
+  };
   function renderFooter(error?: Error) {
-    if (isNameExistsError(error)) {
+    const formValuesMatchContentSent =
+      formValues.title.trim() === contentSent.title && formValues.folder.uid === contentSent.folderUid;
+    if (isNameExistsError(error) && formValuesMatchContentSent) {
       return <NameAlreadyExistsError cancelButton={cancelButton} saveButton={saveButton} />;
     }
-
     return (
       <>
-        {error && (
+        {error && formValuesMatchContentSent && (
           <Alert title="Failed to save dashboard" severity="error">
-            <p>{error.message}</p>
+            {error.message && <p>{error.message}</p>}
           </Alert>
         )}
         <Stack alignItems="center">
@@ -99,10 +106,10 @@ export function SaveDashboardAsForm({ dashboard, drawer, changeInfo }: Props) {
         <Input
           {...register('title', { required: 'Required', validate: validateDashboardName })}
           aria-label="Save dashboard title field"
-          onChange={debounce(async () => {
-            trigger('title');
+          data-testid={selectors.components.Drawer.DashboardSaveDrawer.saveAsTitleInput}
+          onChange={debounce(async (e: ChangeEvent<HTMLInputElement>) => {
+            setValue('title', e.target.value, { shouldValidate: true });
           }, 400)}
-          autoFocus
         />
       </Field>
       <Field
@@ -119,7 +126,11 @@ export function SaveDashboardAsForm({ dashboard, drawer, changeInfo }: Props) {
 
       <Field label="Folder">
         <FolderPicker
-          onChange={(uid: string | undefined, title: string | undefined) => setValue('folder', { uid, title })}
+          onChange={(uid: string | undefined, title: string | undefined) => {
+            setValue('folder', { uid, title });
+            const folderUid = dashboard.state.meta.folderUid;
+            setHasFolderChanged(uid !== folderUid);
+          }}
           // Old folder picker fields
           value={formValues.folder?.uid}
           initialTitle={defaultValues!.folder!.title}

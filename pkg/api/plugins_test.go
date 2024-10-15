@@ -27,15 +27,24 @@ import (
 	"github.com/grafana/grafana/pkg/plugins/manager/fakes"
 	"github.com/grafana/grafana/pkg/plugins/manager/filestore"
 	"github.com/grafana/grafana/pkg/plugins/manager/registry"
+	"github.com/grafana/grafana/pkg/plugins/manager/signature"
+	"github.com/grafana/grafana/pkg/plugins/manager/signature/statickey"
 	"github.com/grafana/grafana/pkg/plugins/pfs"
 	"github.com/grafana/grafana/pkg/plugins/pluginscdn"
 	ac "github.com/grafana/grafana/pkg/services/accesscontrol"
 	"github.com/grafana/grafana/pkg/services/accesscontrol/acimpl"
 	"github.com/grafana/grafana/pkg/services/accesscontrol/actest"
+	"github.com/grafana/grafana/pkg/services/authn"
+	"github.com/grafana/grafana/pkg/services/authn/authntest"
+	"github.com/grafana/grafana/pkg/services/authz/zanzana"
 	contextmodel "github.com/grafana/grafana/pkg/services/contexthandler/model"
+	"github.com/grafana/grafana/pkg/services/featuremgmt"
 	"github.com/grafana/grafana/pkg/services/org"
 	"github.com/grafana/grafana/pkg/services/org/orgtest"
+	"github.com/grafana/grafana/pkg/services/pluginsintegration/managedplugins"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginaccesscontrol"
+	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginassets"
+	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginerrs"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginsettings"
 	"github.com/grafana/grafana/pkg/services/pluginsintegration/pluginstore"
 	"github.com/grafana/grafana/pkg/services/updatechecker"
@@ -49,7 +58,7 @@ func Test_PluginsInstallAndUninstall(t *testing.T) {
 	canInstall := []ac.Permission{{Action: pluginaccesscontrol.ActionInstall}}
 	cannotInstall := []ac.Permission{{Action: "plugins:cannotinstall"}}
 
-	pluginID := "grafana-test-datasource"
+	pluginID := ""
 	localOrg := int64(1)
 	globalOrg := int64(ac.GlobalOrgID)
 
@@ -60,6 +69,7 @@ func Test_PluginsInstallAndUninstall(t *testing.T) {
 		pluginAdminEnabled               bool
 		pluginAdminExternalManageEnabled bool
 		singleOrganization               bool
+		preInstalledPlugin               bool
 	}
 	tcs := []testCase{
 		{expectedCode: http.StatusNotFound, permissionOrg: globalOrg, permissions: canInstall, pluginAdminEnabled: true, pluginAdminExternalManageEnabled: true},
@@ -70,6 +80,7 @@ func Test_PluginsInstallAndUninstall(t *testing.T) {
 		{expectedCode: http.StatusForbidden, permissionOrg: localOrg, permissions: canInstall, pluginAdminEnabled: true, pluginAdminExternalManageEnabled: false},
 		{expectedCode: http.StatusForbidden, permissionOrg: localOrg, permissions: cannotInstall, pluginAdminEnabled: true, pluginAdminExternalManageEnabled: false, singleOrganization: true},
 		{expectedCode: http.StatusOK, permissionOrg: localOrg, permissions: canInstall, pluginAdminEnabled: true, pluginAdminExternalManageEnabled: false, singleOrganization: true},
+		{expectedCode: http.StatusConflict, permissionOrg: globalOrg, permissions: canInstall, pluginAdminEnabled: true, pluginAdminExternalManageEnabled: false, preInstalledPlugin: true},
 	}
 
 	testName := func(action string, tc testCase) string {
@@ -78,11 +89,16 @@ func Test_PluginsInstallAndUninstall(t *testing.T) {
 	}
 
 	for _, tc := range tcs {
+		pluginID = "grafana-test-datasource"
+		if tc.preInstalledPlugin {
+			pluginID = "grafana-preinstalled-datasource"
+		}
 		server := SetupAPITestServer(t, func(hs *HTTPServer) {
 			hs.Cfg = setting.NewCfg()
 			hs.Cfg.PluginAdminEnabled = tc.pluginAdminEnabled
 			hs.Cfg.PluginAdminExternalManageEnabled = tc.pluginAdminExternalManageEnabled
-			hs.Cfg.RBACSingleOrganization = tc.singleOrganization
+			hs.Cfg.RBAC.SingleOrganization = tc.singleOrganization
+			hs.Cfg.PreinstallPlugins = []setting.InstallPlugin{{ID: "grafana-preinstalled-datasource", Version: "1.0.0"}}
 
 			hs.orgService = &orgtest.FakeOrgService{ExpectedOrg: &org.Org{}}
 			hs.accesscontrolService = &actest.FakeService{}
@@ -94,6 +110,19 @@ func Test_PluginsInstallAndUninstall(t *testing.T) {
 					ID: pluginID,
 				},
 			})
+			hs.managedPluginsService = managedplugins.NewNoop()
+
+			expectedIdentity := &authn.Identity{
+				OrgID:       tc.permissionOrg,
+				Permissions: map[int64]map[string][]string{},
+				OrgRoles:    map[int64]org.RoleType{},
+			}
+			expectedIdentity.Permissions[tc.permissionOrg] = ac.GroupScopesByActionContext(context.Background(), tc.permissions)
+			hs.authnService = &authntest.FakeService{
+				ExpectedIdentity: expectedIdentity,
+			}
+
+			hs.log = log.NewNopLogger()
 		})
 
 		t.Run(testName("Install", tc), func(t *testing.T) {
@@ -624,6 +653,7 @@ func Test_PluginsList_AccessControl(t *testing.T) {
 				hs.PluginSettings = &pluginSettings
 				hs.pluginStore = pluginstore.New(pluginRegistry, &fakes.FakeLoader{})
 				hs.pluginFileStore = filestore.ProvideService(pluginRegistry)
+				hs.managedPluginsService = managedplugins.NewNoop()
 				var err error
 				hs.pluginsUpdateChecker, err = updatechecker.ProvidePluginsService(hs.Cfg, nil, tracing.InitializeTracerForTest())
 				require.NoError(t, err)
@@ -726,13 +756,21 @@ func TestHTTPServer_hasPluginRequestedPermissions(t *testing.T) {
 			require.NoError(t, err)
 
 			hs.Cfg = setting.NewCfg()
-			hs.Cfg.RBACSingleOrganization = tt.singleOrg
+			hs.Cfg.RBAC.SingleOrganization = tt.singleOrg
 			hs.pluginStore = &pluginstore.FakePluginStore{
 				PluginList: []pluginstore.Plugin{tt.plugin},
 			}
 			hs.log = logger
 			hs.accesscontrolService = actest.FakeService{}
-			hs.AccessControl = acimpl.ProvideAccessControl(hs.Cfg)
+			hs.AccessControl = acimpl.ProvideAccessControl(featuremgmt.WithFeatures(), zanzana.NewNoopClient())
+
+			expectedIdentity := &authn.Identity{
+				OrgID:       tt.orgID,
+				Permissions: tt.permissions,
+			}
+			hs.authnService = &authntest.FakeService{
+				ExpectedIdentity: expectedIdentity,
+			}
 
 			c := &contextmodel.ReqContext{
 				Context:      &web.Context{Req: httpReq},
@@ -741,6 +779,95 @@ func TestHTTPServer_hasPluginRequestedPermissions(t *testing.T) {
 			hs.hasPluginRequestedPermissions(c, "grafana-test-app")
 
 			assert.Equal(t, tt.warnCount, logger.WarnLogs.Calls)
+		})
+	}
+}
+
+func Test_PluginsSettings(t *testing.T) {
+	pID := "test-datasource"
+	p1 := createPlugin(plugins.JSONData{
+		ID: pID, Type: "datasource", Name: pID,
+		Info: plugins.Info{
+			Version: "1.0.0",
+		}}, plugins.ClassExternal, plugins.NewFakeFS())
+	pluginRegistry := &fakes.FakePluginRegistry{
+		Store: map[string]*plugins.Plugin{
+			p1.ID: p1,
+		},
+	}
+
+	pluginSettings := pluginsettings.FakePluginSettings{Plugins: map[string]*pluginsettings.DTO{
+		pID: {ID: 0, OrgID: 1, PluginID: pID, PluginVersion: "1.0.0"},
+	}}
+
+	type testCase struct {
+		desc             string
+		expectedCode     int
+		errCode          plugins.ErrorCode
+		expectedSettings dtos.PluginSetting
+		expectedError    string
+	}
+	tcs := []testCase{
+		{
+			desc:         "should only be able to get plugin settings",
+			expectedCode: http.StatusOK,
+			expectedSettings: dtos.PluginSetting{
+				Id:   pID,
+				Name: pID,
+				Type: "datasource",
+				Info: plugins.Info{
+					Version: "1.0.0",
+				},
+				SecureJsonFields: map[string]bool{},
+				LoadingStrategy:  plugins.LoadingStrategyScript,
+			},
+		},
+		{
+			desc:          "should return a plugin error",
+			expectedCode:  http.StatusInternalServerError,
+			errCode:       plugins.ErrorCodeFailedBackendStart,
+			expectedError: "Plugin failed to start",
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.desc, func(t *testing.T) {
+			server := SetupAPITestServer(t, func(hs *HTTPServer) {
+				hs.Cfg = setting.NewCfg()
+				hs.PluginSettings = &pluginSettings
+				hs.pluginStore = pluginstore.New(pluginRegistry, &fakes.FakeLoader{})
+				hs.pluginFileStore = filestore.ProvideService(pluginRegistry)
+				errTracker := pluginerrs.ProvideErrorTracker()
+				if tc.errCode != "" {
+					errTracker.Record(context.Background(), &plugins.Error{
+						PluginID:  pID,
+						ErrorCode: tc.errCode,
+					})
+				}
+				pCfg := &config.PluginManagementCfg{}
+				pluginCDN := pluginscdn.ProvideService(pCfg)
+				sig := signature.ProvideService(pCfg, statickey.New())
+				hs.pluginAssets = pluginassets.ProvideService(pCfg, pluginCDN, sig, hs.pluginStore)
+				hs.pluginErrorResolver = pluginerrs.ProvideStore(errTracker)
+				var err error
+				hs.pluginsUpdateChecker, err = updatechecker.ProvidePluginsService(hs.Cfg, nil, tracing.InitializeTracerForTest())
+				require.NoError(t, err)
+			})
+
+			res, err := server.Send(webtest.RequestWithSignedInUser(server.NewGetRequest("/api/plugins/"+pID+"/settings"), userWithPermissions(1, []ac.Permission{})))
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedCode, res.StatusCode)
+			if tc.expectedCode == http.StatusOK {
+				var result dtos.PluginSetting
+				require.NoError(t, json.NewDecoder(res.Body).Decode(&result))
+				require.NoError(t, res.Body.Close())
+				assert.Equal(t, tc.expectedSettings, result)
+			} else {
+				var respJson map[string]any
+				err := json.NewDecoder(res.Body).Decode(&respJson)
+				require.NoError(t, err)
+				require.Equal(t, tc.expectedError, respJson["message"])
+			}
 		})
 	}
 }
